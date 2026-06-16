@@ -1,0 +1,11 @@
+# Команда создания топика с 3 партициями и 2 репликами
+docker exec -it $(docker ps -qf "name=kafka1") /usr/bin/kafka-topics --create --topic my-topic --bootstrap-server kafka1:9092 --partitions 3 --replication-factor 2
+
+# Подробная информация о топике
+docker exec -it $(docker ps -qf "name=kafka1") /usr/bin/kafka-topics --describe --topic my-topic --bootstrap-server kafka1:9092
+
+# Пример вывода (после создания)
+Topic: my-topic   TopicId: xxxx   PartitionCount: 3   ReplicationFactor: 2   Configs:
+    Topic: my-topic   Partition: 0   Leader: 1   Replicas: 1,2   Isr: 1,2
+    Topic: my-topic   Partition: 1   Leader: 2   Replicas: 2,1   Isr: 2,1
+    Topic: my-topic   Partition: 2   Leader: 1   Replicas: 1,2   Isr: 1,2
