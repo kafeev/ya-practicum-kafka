@@ -1,101 +1,124 @@
-# Kafka кластер с producer и двумя типами consumer (Single / Batch)
+# Kafka + Faust Message Filtering System
 
-## Описание классов и параметров
+## Описание
 
-### Продюсер (producer.py)
-- **`acks='all'`** – подтверждение от всех реплик (гарантия at-least-once).  
-- **`retries=3`** – повторные попытки при временных ошибках.  
-- **`enable_idempotence=True`** – предотвращает дублирование при повторных отправках.  
-- **`value_serializer`** – преобразует JSON-строку в байты.  
-- Сообщения отправляются каждые 2 секунды.
+Система обрабатывает поток сообщений через Apache Kafka и Faust.
 
-### Consumer Single (consumer_single.py)
-- **`enable_auto_commit=True`** – автоматический коммит оффсетов после каждого сообщения.  
-- **`group_id='single-consumer-group'`** – отдельная группа, чтобы не мешать batch consumer'у.  
-- **`auto_offset_reset='latest'`** – начинает чтение с новых сообщений.  
-- Десериализация через `Message.from_json()`.
+Реализованы:
 
-### Consumer Batch (consumer_batch.py)
-- **`enable_auto_commit=False`** – ручной коммит.  
-- **`fetch_min_bytes=10240`** – минимальный объём данных для ответа от брокера (10 KB).  
-- **`fetch_max_wait_ms=5000`** – максимальное время ожидания данных.  
-- **`max_poll_records=10`** – максимум записей за один `poll()`.  
-- **`consumer.commit()`** – синхронный коммит после обработки всех сообщений пачки.  
+1. Блокировка пользователей.
+2. Цензура запрещённых слов.
+3. Отправка обработанных сообщений в отдельный Kafka-топик.
 
-### Сериализация/десериализация
-- Используется JSON через класс `Message` (`to_json`, `from_json`).  
-- Ошибки логируются, но не прерывают работу.
+---
 
-### Масштабирование
-- Сервисы `consumer-single` и `consumer-batch` имеют `replicas: 2`.  
-- Экземпляры одного типа используют одинаковый `group.id`, поэтому делят партиции между собой.  
-- Продюсер работает в одном экземпляре.
+## Kafka Topics
 
-## Инструкция по запуску и проверке
+### messages
 
-1. **Сначала запустить только три сервиса**: kafka1, kafka2, zookeeper
+Входящие сообщения.
 
-```bash
-docker-compose up -d zookeeper kafka1 kafka2, kafka-ui
+### filtered_messages
+
+Сообщения после обработки.
+
+### blocked_users
+
+Информация о блокировках пользователей.
+
+### banned_words
+
+Список запрещённых слов.
+
+---
+
+## Логика работы
+![alt text](picts/planuml.png)
+
+
+### Блокировка пользователей
+
+Первоначально я прямо в коде закинул в топик заблокированных пользователей пару значений.
+
+Пример:
+
+```pytnon
+logger.info("Блокировка пользователя Bob для Alice...")
+
+producer.send(
+    "blocked_users",
+    {
+        "user": "alice",
+        "blocked_user": "bob"
+    }
+)
 ```
 
-2. **Создаем топик** перед запуском продюсера и консюмеров:
-```bash
-docker exec -it $(docker ps -qf "name=kafka1") /usr/bin/kafka-topics --create --topic my-topic --bootstrap-server kafka1:9092 --partitions 3 --replication-factor 2
-```
-проверяем что получилось командой:
+### Блокировка по словам
 
-```bash
-docker exec -it $(docker ps -qf "name=kafka1") /usr/bin/kafka-topics --describe --topic my-topic --bootstrap-server kafka1:9092
-```
+Далее я также прямо в коде добавил в топик пару запрещенных слов.
 
-примерный вывод:
+```pyton
+logger.info("Добавление запрещенных слов...")
 
-![alt text](picts/topics.png)
+producer.send(
+    "banned_words",
+    {
+        "word": "идиот"
+    }
+)
 
+producer.send(
+    "banned_words",
+    {
+        "word": "дурак"
+    }
+)
 
-Так как в нашей конфигурации kafka отключено автоматическое создание топиков, то елси бы мы запустили продюсера без созданного топика, он бы упал.
-
-3. Теперь только запускаем приложения:
-```bash
-docker-compose up -d producer consumer-single consumer-batch
-```
-
-4. Проверяем, что продюсер пишет сообщения:
-
-```bash
-# Продюсер
-docker-compose logs producer
 ```
 
-будет что-то типа:
+прим. конечно можно было бы выставить API метод для этого, но.... реализовал минимально необходимые требования =)
 
-![alt text](picts/producer.png)
+## краткое описание какие сервисы реализованы
 
-5. Проверяем, что consumer-single читает сообщения: 
+- `zookeeper`- для координации кластера
+- `kafka1` - сама kafka
+- `kafka-init` - просто приложение для создания необходимых топиков в правильно порядке =)
+- `kafka-ui` - для удобства контроля\тестирования что куда пишется и как
+- `producer` - API сервис для принятия сообщений по http и публикации его в топик **messages**
+- `processor` - основной сервис по обработке и фильтрации сообщений по ключевым словам и по заблокированным отправителям
+- `consumer` - потребитель сообщений из отфильтрованного топика **filtered_messages**
 
-```bash
-# Single consumer (оба экземпляра)
-docker-compose logs consumer-single
-```
+## Как запустить и приготовить стенд для теста
 
-примерный вывод
-
-![alt text](picts/single-consumer.png)
-
-6. Проверяем, что consumer-batch читает сообщения: 
-
-```bash
-# Batch consumer 
-docker-compose logs consumer-batch
-```
-
-примерный вывод
-
-![alt text](picts/consumer-batch.png)
-
-ЧТобы почистить за собой =)
+запускаем одной командой
 
 ```bash
-docker compose down
+
+docker compose up --build -d
+
 ```
+
+далее ждем когда поднимутся все контейнеры
+
+![alt text](picts/dockerDesktop.png)
+
+прим. kafka-init - остановится сразу после отработки. так как после создания топиков он не нужен
+
+идем в kafka-ui 
+http://localhost:8080/ui/clusters/local/all-topics?perPage=25&hideInternal=true 
+
+и проверям, что там все топкии созданы
+
+![alt text](picts/kafka-ui.png)
+
+## Тестирование
+
+для тестирования я использовал VSCode с extension REST для отправки запросов
+все запросы в файле queries.rest
+
+Последовательно отправляем запросы, проверяме через kafka-ui в какие топики они долетели после фильтрации
+проверям логи приложения processor
+
+![logs](picts/all.png)
+
