@@ -1,124 +1,103 @@
-# Kafka + Faust Message Filtering System
-
-## Описание
-
-Система обрабатывает поток сообщений через Apache Kafka и Faust.
-
-Реализованы:
-
-1. Блокировка пользователей.
-2. Цензура запрещённых слов.
-3. Отправка обработанных сообщений в отдельный Kafka-топик.
-
----
-
-## Kafka Topics
-
-### messages
-
-Входящие сообщения.
-
-### filtered_messages
-
-Сообщения после обработки.
-
-### blocked_users
-
-Информация о блокировках пользователей.
-
-### banned_words
-
-Список запрещённых слов.
-
----
-
-## Логика работы
-![alt text](picts/planuml.png)
 
 
-### Блокировка пользователей
 
-Первоначально я прямо в коде закинул в топик заблокированных пользователей пару значений.
+1. Установить инфраструктуру
 
-Пример:
-
-```pytnon
-logger.info("Блокировка пользователя Bob для Alice...")
-
-producer.send(
-    "blocked_users",
-    {
-        "user": "alice",
-        "blocked_user": "bob"
-    }
-)
+запуск docker-compose файла
+```bash
+docker compose up -d
 ```
 
-### Блокировка по словам
-
-Далее я также прямо в коде добавил в топик пару запрещенных слов.
-
-```pyton
-logger.info("Добавление запрещенных слов...")
-
-producer.send(
-    "banned_words",
-    {
-        "word": "идиот"
-    }
-)
-
-producer.send(
-    "banned_words",
-    {
-        "word": "дурак"
-    }
-)
-
+2 создать топик
+```bash
+kafka-topics --bootstrap-server localhost:9092 --create --topic balanced_topic --partitions 8 --replication-factor 3 --if-not-exists
 ```
 
-прим. конечно можно было бы выставить API метод для этого, но.... реализовал минимально необходимые требования =)
+3. просмотреть текущее распределени
+```bash
+kafka-topics --bootstrap-server localhost:9092 --describe --topic balanced_topic
+```
 
-## краткое описание какие сервисы реализованы
+будет вывод:
 
-- `zookeeper`- для координации кластера
-- `kafka1` - сама kafka
-- `kafka-init` - просто приложение для создания необходимых топиков в правильно порядке =)
-- `kafka-ui` - для удобства контроля\тестирования что куда пишется и как
-- `producer` - API сервис для принятия сообщений по http и публикации его в топик **messages**
-- `processor` - основной сервис по обработке и фильтрации сообщений по ключевым словам и по заблокированным отправителям
-- `consumer` - потребитель сообщений из отфильтрованного топика **filtered_messages**
+![alt text](picts/1.png)
 
-## Как запустить и приготовить стенд для теста
-
-запускаем одной командой
+4. создаем файл reassignment.json для перераспределния партиций. Захоим на первый брокер и выполняем в терминале
 
 ```bash
+cd /tmp
 
-docker compose up --build -d
+# echo '{
+#     "version": 1,
+#     "topics": [{"topic": "balanced_topic"}]
+# }' > topics_to_move.json
 
+# kafka-reassign-partitions --bootstrap-server localhost:9092 --broker-list "1,2,3" --topics-to-move-json-file "topics_to_move.json" --generate
+
+echo '{
+"version":1,
+"partitions":[
+{"topic":"balanced_topic","partition":0,"replicas":[3,1,2],"log_dirs":["any","any","any"]},
+{"topic":"balanced_topic","partition":1,"replicas":[1,2,3],"log_dirs":["any","any","any"]},
+{"topic":"balanced_topic","partition":2,"replicas":[2,3,1],"log_dirs":["any","any","any"]},
+{"topic":"balanced_topic","partition":3,"replicas":[3,2,1],"log_dirs":["any","any","any"]},
+{"topic":"balanced_topic","partition":4,"replicas":[1,3,2],"log_dirs":["any","any","any"]},
+{"topic":"balanced_topic","partition":5,"replicas":[2,1,3],"log_dirs":["any","any","any"]},
+{"topic":"balanced_topic","partition":6,"replicas":[3,1,2],"log_dirs":["any","any","any"]},
+{"topic":"balanced_topic","partition":7,"replicas":[1,2,3],"log_dirs":["any","any","any"]}
+]
+}' > reassignment.json
+```
+5. пробуем сгенерировать план по перераспределению
+```bash
+kafka-reassign-partitions \
+--bootstrap-server localhost:9092 \
+--broker-list "1,2,3" \
+--topics-to-move-json-file "/tmp/reassignment.json" \
+--generate
 ```
 
-далее ждем когда поднимутся все контейнеры
+будет вывод:
 
-![alt text](picts/dockerDesktop.png)
+![alt text](picts/2.png)
 
-прим. kafka-init - остановится сразу после отработки. так как после создания топиков он не нужен
+6. применяем изменения
 
-идем в kafka-ui 
-http://localhost:8080/ui/clusters/local/all-topics?perPage=25&hideInternal=true 
+```bash
+kafka-reassign-partitions \
+--bootstrap-server localhost:9092 \
+--reassignment-json-file /tmp/reassignment.json \
+--execute
+```
 
-и проверям, что там все топкии созданы
+и проверяем, что она прошла без ошибок
+```bash
+kafka-reassign-partitions \
+--bootstrap-server localhost:9092 \
+--reassignment-json-file /tmp/reassignment.json \
+--verify
+```
+будет примерно такой вывод:
 
-![alt text](picts/kafka-ui.png)
+![alt text](picts/3.png)
 
-## Тестирование
+7. проверяме, что балансировка изменилась
+```bash
+kafka-topics --bootstrap-server localhost:9092 --topic balanced_topic --describe
+```
 
-для тестирования я использовал VSCode с extension REST для отправки запросов
-все запросы в файле queries.rest
+8. останавливаем один брокер и проверямем как изменилось перераспределение
+```bash
+kafka-topics --bootstrap-server localhost:9092 --describe --topic balanced_topic
+```
 
-Последовательно отправляем запросы, проверяме через kafka-ui в какие топики они долетели после фильтрации
-проверям логи приложения processor
+будет вывод:
 
-![logs](picts/all.png)
+![alt text](picts/4.png)
 
+**ВНИМАНИЕ:** видим, что пропал один из лидеров (третий)
+
+9. возвращаем брокер обратно и снова проверяем перераспределние
+после чего видимм что синхронизация восстановилась:
+
+![alt text](picts/5.png)
