@@ -119,6 +119,7 @@ note right of PROM
 end note
 @enduml
 ```
+![alt text](picts/schema.png)
 
 
 **Взаимосвязи:**
