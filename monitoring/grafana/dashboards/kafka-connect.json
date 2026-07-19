@@ -1,0 +1,167 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Kafka Connect worker: состояние",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "kafka_connect_connect_worker_metrics_connector_count", "legendFormat": "connectors" },
+        { "expr": "kafka_connect_connect_worker_metrics_task_count", "legendFormat": "tasks" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" }
+    },
+    {
+      "id": 2,
+      "title": "Connector health (up = работает)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        { "expr": "debezium_postgres_connector_metrics_connected", "legendFormat": "connected" },
+        { "expr": "kafka_connect_task_error_metrics_total_record_errors", "legendFormat": "record errors" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" }
+    },
+    {
+      "id": 3,
+      "title": "Startup success / failure",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "kafka_connect_connect_worker_metrics_connector_startup_success_total", "legendFormat": "connector ok" },
+        { "expr": "kafka_connect_connect_worker_metrics_connector_startup_failure_total", "legendFormat": "connector fail" },
+        { "expr": "kafka_connect_connect_worker_metrics_task_startup_success_total", "legendFormat": "task ok" },
+        { "expr": "kafka_connect_connect_worker_metrics_task_startup_failure_total", "legendFormat": "task fail" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" }
+    },
+    {
+      "id": 4,
+      "title": "Throughput: source record write rate (записей/сек)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "kafka_connect_source_task_metrics_source_record_write_rate", "legendFormat": "write rate" },
+        { "expr": "kafka_connect_source_task_metrics_source_record_poll_rate", "legendFormat": "poll rate" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 5,
+      "title": "События Debezium: всего (create/update/delete)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "kafka_connect_source_task_metrics_source_record_poll_total", "legendFormat": "source records polled (total)" },
+        { "expr": "debezium_postgres_connector_metrics_totalnumberofeventsseen", "legendFormat": "events seen (total)" },
+        { "expr": "debezium_postgres_connector_metrics_totalnumberofcreateeventsseen", "legendFormat": "create events (total)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 6,
+      "title": "Lag: отставание от источника (ms)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "debezium_postgres_connector_metrics_millisecondsbehindsource", "legendFormat": "ms behind source" },
+        { "expr": "debezium_postgres_connector_metrics_millisecondssincelastevent", "legendFormat": "ms since last event" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 7,
+      "title": "Очередь коннектора (размер / оставшаяся ёмкость, bytes)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "debezium_postgres_connector_metrics_currentqueuesizeinbytes", "legendFormat": "current queue size" },
+        { "expr": "debezium_postgres_connector_metrics_queueremainingcapacity", "legendFormat": "remaining capacity" },
+        { "expr": "debezium_postgres_connector_metrics_maxqueuesizeinbytes", "legendFormat": "max queue size" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 8,
+      "title": "Ошибки обработки событий",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "debezium_postgres_connector_metrics_numberoferroneousevents", "legendFormat": "erroneous events" },
+        { "expr": "kafka_connect_task_error_metrics_total_record_errors", "legendFormat": "record errors (task)" },
+        { "expr": "debezium_postgres_connector_metrics_numberofeventsfiltered", "legendFormat": "events filtered" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 9,
+      "title": "JVM: использование памяти",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        { "expr": "jvm_memory_bytes_used{area=\"heap\"}", "legendFormat": "heap used" },
+        { "expr": "jvm_memory_bytes_used{area=\"nonheap\"}", "legendFormat": "nonheap used" },
+        { "expr": "jvm_memory_bytes_max{area=\"heap\"}", "legendFormat": "heap max" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 10,
+      "title": "JVM: CPU и сборка мусора",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        { "expr": "jvm_cpu_usage * 100", "legendFormat": "cpu usage %" },
+        { "expr": "rate(jvm_gc_collection_seconds_sum[5m])", "legendFormat": "GC time rate" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 11,
+      "title": "Rebalance worker (мс с последнего / длительность)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [
+        { "expr": "kafka_connect_connect_worker_rebalance_metrics_time_since_last_rebalance_ms", "legendFormat": "ms since last rebalance" },
+        { "expr": "kafka_connect_connect_worker_rebalance_metrics_rebalance_avg_time_ms", "legendFormat": "avg rebalance ms" },
+        { "expr": "kafka_connect_connect_worker_rebalance_metrics_rebalancing", "legendFormat": "rebalancing (1=да)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    }
+  ],
+  "schemaVersion": 36,
+  "tags": ["kafka", "kafka-connect", "debezium", "postgres-cdc"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Kafka Connect + Debezium мониторинг",
+  "uid": "kafka-connect-mon",
+  "version": 1
+}
