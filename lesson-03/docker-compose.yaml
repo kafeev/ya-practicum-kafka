@@ -96,47 +96,6 @@ services:
       - kafka2
       - kafka3
 
-  kafka-connect:
-    image: confluentinc/cp-kafka-connect:7.0.1
-    ports:
-      - "8083:8083"
-    environment:
-      CONNECT_BOOTSTRAP_SERVERS: kafka1:9092,kafka2:9093,kafka3:9094
-      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
-      CONNECT_GROUP_ID: connect-cluster
-      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      CONNECT_REST_PORT: 8083
-      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
-      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
-      CONNECT_STATUS_STORAGE_TOPIC: connect-status
-      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 2
-      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 2
-      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 2
-    networks:
-      - kafka-network
-    depends_on:
-      - zookeeper
-      - kafka1
-      - kafka2
-      - kafka3
-
-  postgres:
-    image: postgres:15
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: kafkatest
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - kafka-network
-
 networks:
   kafka-network:
     driver: bridge
-
-volumes:
-  postgres-data:
