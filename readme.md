@@ -1,206 +1,298 @@
-# CDC-конвейер Postgres → Kafka через Debezium
+# Kafka-кластер: 3 брокера + SSL + ACL (KRaft)
 
-Автоматический захват изменений (CDC — Change Data Capture) из таблиц `users` и `orders`
-базы PostgreSQL и доставка их в Kafka через Debezium Connector, с мониторингом
-на базе Prometheus и Grafana.
+## Содержание
+
+1. [Архитектура](#1-архитектура)
+2. [Структура проекта](#2-структура-проекта)
+3. [Предварительные требования](#3-предварительные-требования)
+4. [Шаг 1. Генерация сертификатов](#шаг-1-генерация-сертификатов)
+5. [Шаг 2. Запуск кластера](#шаг-2-запуск-кластера)
+6. [Шаг 3. Создание топиков](#шаг-3-создание-топиков)
+7. [Шаг 4. Настройка ACL](#шаг-4-настройка-acl)
+8. [Полная последовательность проверки](#шаг-5-полная-последовательность-проверки)
+9. [Остановка и перезапуск](#шаг-6-остановка-и-перезапуск)
+10. [Запуск на другом компьютере](#шаг-7-запуск-на-другом-компьютере)
+11. [Известные особенности и решения](#11-известные-особенности-и-решения)
 
 ---
 
-## 1. Инструкция по запуску через Docker Compose
+## 1. Архитектура
 
-### Требования
-- Docker и Docker Compose (v2)
-- Права на скачивание образов из Docker Hub (интернет)
+| Компонент | Описание |
+|---|---|
+| `kafka1`, `kafka2`, `kafka3` | Брокеры KRaft, роли `broker,controller` |
+| Контроллерный кворум | 3 узла (quorum voters) на PLAINTEXT-листенере `9093` |
+| SSL-листенер | порты `9095` / `9096` / `9097`, mTLS |
+| `producer` | Python-клиент (kafka-python), пишет в `topic-1` |
+| `consumer` | Python-клиент (kafka-python), читает из `topic-1` |
+| Авторизация | `StandardAuthorizer`, `allow.everyone.if.no.acl.found=false` |
 
-### Шаги запуска
+Схема листенеров брокера (например, kafka1):
 
-1. перейти в каталог:
+- `CONTROLLER://0.0.0.0:9093` — внутренний контрольный трафик, PLAINTEXT (только в контейнерной сети);
+- `SSL://0.0.0.0:9095` — клиентский и межброкерский трафик, SSL с взаимной аутентификацией.
 
-```bash
-cd ya-practicum-kafka
+### Схема прав (ACL)
+
+| Топик | Продюсер (`User:producer`) | Консьюмер (`User:consumer`) |
+|---|---|---|
+| `topic-1` | DESCRIBE, READ, WRITE | DESCRIBE, READ |
+| `topic-2` | DESCRIBE, WRITE | DESCRIBE (читать **не может**) |
+| Группа `*` | — | DESCRIBE, READ |
+
+Суперпользователи (`KAFKA_SUPER_USERS`): `User:admin`, `User:kafka1`, `User:kafka2`,
+`User:kafka3`, `User:ANONYMOUS`.
+
+---
+
+## 2. Структура проекта
+
+```
+.
+├── docker-compose.yaml          # кластер (3 брокера) + producer + consumer
+├── producer/
+│   ├── Dockerfile
+│   ├── requirements.txt         # kafka-python==2.0.2
+│   └── producer.py              # шлёт JSON-сообщения в топик
+├── consumer/
+│   ├── Dockerfile
+│   └── consumer.py              # читает сообщения из топика
+├── ssl/
+│   ├── generate-certs.sh        # генерация CA, keystore, truststore, PEM
+│   ├── certs/                   # сгенерированные сертификаты
+│   └── config/
+│       ├── admin.properties     # SSL-конфиг админа для утилит (kafka-acls, ...)
+│       ├── producer.properties  # SSL-конфиг клиента-продюсера
+│       ├── consumer.properties  # SSL-конфиг клиента-консьюмера
+│       ├── create-topics.sh     # создание топиков (отдельный скрипт)
+│       └── setup-acls.sh        # настройка ACL (отдельный скрипт)
 ```
 
-2. запустить все сервисы в фоновом режиме:
+---
+
+## 3. Требования для запуска проекта
+
+- Docker с Docker Compose
+- `openssl` и `keytool` (JDK) — только для генерации сертификатов
+
+---
+
+## Шаг 1. Генерация сертификатов
+
+Сертификаты уже сгенерированы и лежат в `ssl/certs/` (каталог игнорируется git).
+
+Если хотчется сгенерировать заново можно запустить скрипт:
 
 ```bash
-docker compose up -d
+docker run --rm -v ${PWD}/ssl:/ssl -w /ssl confluentinc/cp-kafka:7.5.0 bash generate-certs.sh
 ```
 
-3. дождаться старта (Kafka Connect и Debezium требуют ~30-60 сек):
+Скрипт создаёт:
+
+- самоподписанный CA (`ca-cert`, `ca-key`);
+- `kafka.truststore.jks` — общий truststore брокеров и клиентов;
+- `kafka{1..3}.keystore.jks` — keystore брокеров с SAN `DNS:kafkaN`;
+- `client.{producer,consumer,admin}.keystore.jks` — keystore клиентов;
+- `client.{producer,consumer,admin}-{cert,key}.pem` — PEM для Python-клиентов.
+
+Пароль всех хранилищ по умолчанию: `kafka123` (он же в `credentials`).
+
+> **Важно.** 
+> 
+> CN сертификата клиента становится принципалом в ACL.
+> 
+> Для `client.producer` CN = `producer` → принципал `User:producer`, и т.д.
+
+---
+
+## Шаг 2. Запуск кластера
 
 ```bash
-docker compose ps
+docker compose up -d --build
 ```
 
-все сервисы должны быть в состоянии `Up` / `healthy`.
+Проверка, что все брокеры поднялись и healthy:
 
-4. создаем таблицы в PostgreSQL:
+![alt text](picts/image.png)
 
-```bash
-# закинем файл sql команда внутрь контейнера для уобства
-docker cp sql-table.sql ya-practicum-kafka-postgres-1:/tmp/sql-table.sql
-docker exec -i ya-practicum-kafka-postgres-1 psql -U user -d kafkatest -f /tmp/sql-table.sql
-```
-![alt text](picts/tables-created.png)
+Три брокера должны иметь статус `Up ... (healthy)`.
 
-5. зарегистрируем Debezium Connector:
+> **Первый запуск / после `down` без `-v`:** топики и ACL хранятся внутри
+> контейнеров брокеров и исчезают при удалении контейнеров — выполняйте шаги 3 и 4.
 
-Конфигурация хранится в файле debezium-connector.json и регистрируется через REST API Kafka Connect (POST /connectors).
+---
 
-Важно: для работы Debezium в Postgres должен быть включён wal_level = logical (в docker-compose.yaml задано через command: postgres -c wal_level=logical).
-
+## Шаг 3. Создание топиков
+Так как все скрипты были уже скопированы на брокеры kafka, то можно запускать скрипт создания топиков прямо изнутри.
+Можно работать с любой kafa1\kafka2\kafka3:
 
 ```bash
-curl -X POST http://localhost:8083/connectors \
-  -H "Content-Type: application/json" \
-  -d @debezium-connector.json
+docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
 ```
 
-6. проверим, что коннектор работает:
+Скрипт создаёт `topic-1` и `topic-2` (3 партиции, RF=3) и выводит их список.
+
+---
+
+## Шаг 4. Настройка ACL
+Скрипт для срздания политик доступа (ACL) также скопирован на каждый брокер.
+
+Так что можно запускать на любом:
 
 ```bash
-curl -s http://localhost:8083/connectors/postgres-connector/status | jq
+docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
+```
+
+Скрипт выставляет ACL по схеме из [раздела 1](#1-архитектура) и выводит их список.
+
+> Оба скрипта монтируются в брокеры из `ssl/config` (каталог `/etc/kafka/ssl-config`).
+
+---
+
+## Шаг 5. Полная последовательность проверки
+
+### 5.0 Проверка автоматических клиентов (topic-1)
+
+Продюсер и консьюмер из `docker-compose` работают с `topic-1` постоянно.
+
+```bash
+# продюсер шлёт сообщения каждые 2 секунды
+docker compose logs -f producer
+
+# консьюмер их читает (topic-1)
+docker compose logs -f consumer
+```
+
+В логах консьюмера появляются блоки `===== RECEIVED MESSAGE =====`.
+
+![alt text](picts/consumer-log-recievedmessage.png)
+
+### 5.1 Продюсер пишет в topic-1 и topic-2 (у него READ/WRITE/DESCRIBE на оба)
+
+![alt text](picts/producer-write-message.png)
+
+```bash
+docker compose run --rm -e TOPIC=topic-2 producer python -u -c "
+import os, ssl
+from kafka import KafkaProducer
+ctx = ssl.create_default_context(cafile='/etc/kafka/secrets/ca-cert')
+ctx.load_cert_chain('/etc/kafka/secrets/client.producer-cert.pem','/etc/kafka/secrets/client.producer-key.pem')
+ctx.check_hostname = False
+p = KafkaProducer(bootstrap_servers=['kafka1:9095','kafka2:9096','kafka3:9097'], value_serializer=lambda v: v.encode(), security_protocol='SSL', ssl_context=ctx)
+print('topic-1:', p.send('topic-1', value='t1').get(timeout=15))
+print('topic-2:', p.send('topic-2', value='t2').get(timeout=15))
+p.close()
+"
+```
+
+Оба вызова должны вернуть `RecordMetadata` (успех), т.е. продюсер может писать
+и в `topic-1`, и в `topic-2`.
+
+### 5.2 Консьюмер читает topic-1 (у него READ)
+
+Автоматический консьюмер уже читает `topic-1` — см. пункт 5.0.
+
+### 5.3 Консьюмер НЕ может читать topic-2 (только DESCRIBE) — негативный тест
+
+```bash
+docker compose run --rm -e TOPIC=topic-2 consumer python -u consumer.py
+```
+
+Ожидаемый результат — ошибка:
+
+```
+kafka.errors.TopicAuthorizationFailedError: [Error 29] TopicAuthorizationFailedError: {'topic-2'}
 ```
 
 
-Ожидаемый результат: 
+![alt text](picts/consumer-topic-2-error.png)
 
-![alt text](picts/connector-status.png)
+и в логах `WARNING:...Not authorized to read from topic topic-2.`
+Это подтверждает, что на `topic-2` у консьюмера только `DESCRIBE`.
 
-### Остановка и очистка
+### 5.4 Просмотр текущих ACL
 
 ```bash
-# остановить, сохранив данные (volume)
+docker compose exec kafka1 kafka-acls --bootstrap-server kafka1:9095 --command-config /etc/kafka/ssl-config/admin.properties --list
+```
+![alt text](picts/acl.png)
+
+---
+
+## Шаг 6. Остановка и перезапуск
+
+Остановить:
+
+```bash
 docker compose down
+```
 
-# полная очистка вместе с данными
+Запустить снова (топики/ACL не персистятся):
+
+```bash
+docker compose up -d --build
+docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
+docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
+```
+
+Полностью удалить вместе с данными:
+
+```bash
 docker compose down -v
 ```
 
 ---
 
+## 10. Запуск на другом компьютере
 
-### Схема потока данных
+Склонируйте репозиторий и запустите из его корня — весь код, сертификаты
+(`ssl/certs/`) и скрипты уже входят в репозиторий:
 
-```plantuml
-@startuml
-!define RECTANGLE class
+```bash
+git clone <URL-репозитория> ya-practicum-kafka
+cd ya-practicum-kafka
 
-skinparam componentStyle rectangle
-skinparam shadowing false
-skinparam defaultTextAlignment center
+# 1) собрать и поднять кластер
+docker compose up -d --build
 
-package "Источник" {
-  [PostgreSQL\n(users, orders)\nwal_level=logical] as PG
-}
+# 2) создать топики
+docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
 
-package "CDC / Kafka" {
-  [Kafka Connect\nDebezium\npostgres-connector] as CONNECT
-  [Kafka Broker\npg-server.public.users\npg-server.public.orders] as KAFKA
-}
+# 3) настроить ACL
+docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
 
-package "Мониторинг" {
-  [Prometheus\n:9090] as PROM
-  [Grafana\n:3000] as GRAF
-}
-
-[Python consumer\n(контейнер)] as CONS
-
-PG -right-> CONNECT : WAL (logical)\nчтение изменений
-CONNECT -right-> KAFKA : CDC-события\n(op c/u/d)
-KAFKA -right-> CONS : чтение топиков\n(docker-сервис)
-
-CONNECT -down-> PROM : JMX-метрики\n:8084
-PROM -right-> GRAF : scrape + визуализация
-
-note right of PROM
-  kafka-connect :8084
-  scrape interval 15s
-end note
-@enduml
+# 4) проверка (см. раздел 5)
+docker compose logs -f producer
+docker compose logs -f consumer
 ```
-![alt text](picts/schema.png)
 
-
-**Взаимосвязи:**
-- `kafka-connect` подключается к `postgres` (чтение WAL) и к `kafka` (запись в топики `pg-server.public.users`, `pg-server.public.orders`).
-- Брокер `kafka` использует `zookeeper` для координации.
-- `consumer` — отдельный docker-сервис (собирается из `Dockerfile.consumer`), подключается к брокеру `kafka:29092` внутри сети и выводит CDC-события в свой stdout (`docker compose logs consumer`).
-- `kafka-connect` отдаёт JMX-метрики агенту на порту `8084`; `prometheus` забирает их раз в 15с.
-- `grafana` берёт данные из `prometheus` и строит графики.
-
+Так как сертификаты, ключи и скрипты хранятся в репозитории (`ssl/`),
+отдельной генерации на целевой машине не требуется.
 
 ---
 
-## 4. Пошаговая проверка работоспособности (с тестовыми данными)
+## 11. Известные особенности и решения
 
-### Шаг 1. Статус коннектора
-```bash
-curl -s http://localhost:8083/connectors/postgres-connector/status | jq
-```
-Должно быть `"state": "RUNNING"` для коннектора и таска.
+**`AuthorizerNotReadyException` на старте (VOTE/FETCH).**
+Контроллерный листенер `CONTROLLER` использует PLAINTEXT, и запросы по нему
+идут с принципалом `Anonymous`, а авторизатор ещё «не готов». Решение —
+добавить `User:ANONYMOUS` в `KAFKA_SUPER_USERS` и задать
+`KAFKA_EARLY_START_LISTENERS: CONTROLLER`.
 
-### Шаг 2. Заливка тестовых данных
-```bash
-docker cp sql-test-data.sql ya-practicum-kafka-postgres-1:/tmp/sql-test-data.sql
-docker exec -i ya-practicum-kafka-postgres-1 psql -U user -d kafkatest -f /tmp/sql-test-data.sql
-```
-Добавляются 4 пользователя и 5 заказов.
+**Разделитель в `KAFKA_SUPER_USERS` — только `;`.**
+`StandardAuthorizer.getConfiguredSuperUsers()` разбивает список по `;`.
+Значение через запятую парсится как один принципиал и не работает.
 
-### Шаг 3. Проверка появления топиков
-```bash
-docker exec -i ya-practicum-kafka-kafka-1 kafka-topics \
-  --bootstrap-server localhost:9092 --list | grep pg-server
-```
-Ожидаемый вывод: 
-![alt text](picts/topics-list.png)
+**`[Error 31] ClusterAuthorizationFailedError` у продюсера.**
+Идемпотентный продюсер шлёт `InitProducerId`, что требует операцию
+`IDEMPOTENT_WRITE` на ресурсе CLUSTER. В стенде kafka-python==2.0.2, которая
+идемпотентность не использует, поэтому отдельной CLUSTER-ACL не нужно.
 
-### Шаг 4. Чтение CDC через консольный consumer
-```bash
-docker exec -it ya-practicum-kafka-kafka-1 kafka-console-consumer \
-  --bootstrap-server localhost:9092 \
-  --topic pg-server.public.users --from-beginning
-```
-Должны появиться сообщения с `op":"c"` (create) и данными строк.
+**`KAFKA_AUTO_CREATE_TOPICS_ENABLE: false`.**
+Автосоздание топиков выключено, чтобы лишние топики не создавались
+неавторизованными клиентами.
 
-![alt text](picts/console-consumer.png)
-
-### Шаг 5. Проверка через Python-консьюмер в контейнере
-
-Consumer запущен как отдельный сервис `consumer` в `docker-compose.yaml`
-(образ собирается из `Dockerfile.consumer`, подключается к брокеру `kafka:29092`
-внутри docker-сети). Он автоматически стартует вместе со всеми сервисами и выводит
-в свой stdout все CDC-события из топиков `pg-server.public.users` и `pg-server.public.orders`.
-
-Посмотреть, что он вычитал из топиков:
-
-```bash
-docker compose logs consumer
-```
-
-Пример вывода (snapshot при первом старте + живые изменения):
-
-![alt text](picts/consumer-output.png)
-
-
-### Шаг 6. Проверка через Grafana (визуализация)
-1. открываем http://localhost:3000 (логин/пароль: `admin`/`admin`).
-2. дашборд **«Kafka Connect + Debezium мониторинг»**.
-
-![pic](picts/grafana-dashboard-main.png)
-
-### Шаг 7. Проверка метрик в Prometheus
-- UI: http://localhost:9090 — запрос, напр. `kafka_connect_source_task_metrics_source_record_write_rate`
-- Raw-метрики Kafka Connect: http://localhost:8084/metrics
-
-![alt text](picts/prometheus-metrics.png)
-
-### Ожидаемый итог
-- `postgres-connector` в состоянии `RUNNING`;
-- вставки в `users`/`orders` попадают в соответствующие топики Kafka;
-- сервис `consumer` выводит все изменения (snapshot + живые события) в свой лог (`docker compose logs consumer`);
-- Grafana/Prometheus показывают метрики передачи данных и здоровья коннектора.
-
----
-
-
+**Безопасность секретов.**
+Каталог `ssl/certs/` содержит приватные ключи и пароли хранилищ —
+убедитесь, что репозиторий (remote) приватный. Каталог `temp/` из git исключён
+(`.gitignore`).
