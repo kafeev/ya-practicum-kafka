@@ -1,15 +1,12 @@
 import json
-import os
 
 from kafka import KafkaProducer
 from kafka.serializer import Serializer
 
-KAFKA_HOST = os.getenv("KAFKA_HOST", "rc1a-6ibie76edoio2ab7.mdb.yandexcloud.net")
-KAFKA_PORT = int(os.getenv("KAFKA_PORT", "9091"))
-KAFKA_USER = os.getenv("KAFKA_USER", "practicumuser")
-KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD", "SecurePass2026")
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "topic-1")
-CA_FILE = os.getenv("CA_FILE", "YandexInternalRootCA.crt")
+from config import config
+from logger import get_logger
+
+log = get_logger(__name__)
 
 
 class JsonSerializer(Serializer):
@@ -17,23 +14,40 @@ class JsonSerializer(Serializer):
         return json.dumps(value).encode("utf-8")
 
 
-def main() -> None:
-    producer = KafkaProducer(
-        bootstrap_servers=f"{KAFKA_HOST}:{KAFKA_PORT}",
-        security_protocol="SASL_SSL",
-        sasl_mechanism="SCRAM-SHA-512",
-        sasl_plain_username=KAFKA_USER,
-        sasl_plain_password=KAFKA_PASSWORD,
-        ssl_cafile=CA_FILE,
-        api_version=(2, 8, 0),
-        value_serializer=JsonSerializer(),
-    )
+class JsonProducer:
+    """Продюсер JSON-сообщений.
 
-    producer.send(KAFKA_TOPIC, key=b"key-1", value={"message": "hello from producer"})
-    producer.flush()
-    print("Message sent")
-    producer.close()
+    Kafka-продюсер инициализируется в конструкторе, вне точки запуска.
+    """
+
+    def __init__(self) -> None:
+        self._producer = KafkaProducer(
+            bootstrap_servers=config.kafka_brokers,
+            security_protocol=config.security_protocol,
+            sasl_mechanism=config.sasl_mechanism,
+            sasl_plain_username=config.kafka_user,
+            sasl_plain_password=config.kafka_password,
+            ssl_cafile=config.ca_file,
+            api_version=(2, 8, 0),
+            value_serializer=JsonSerializer(),
+        )
+
+    def send(self, topic: str | None = None, key: bytes = b"key-1",
+             value: dict | None = None) -> None:
+        topic = topic or config.kafka_topic
+        value = value or {"message": "hello from producer"}
+
+        self._producer.send(topic, key=key, value=value)
+        self._producer.flush()
+        log.info("Message sent")
+
+    def close(self) -> None:
+        self._producer.close()
 
 
 if __name__ == "__main__":
-    main()
+    producer = JsonProducer()
+    try:
+        producer.send()
+    finally:
+        producer.close()

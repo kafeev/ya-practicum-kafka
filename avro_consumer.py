@@ -7,51 +7,74 @@ from confluent_kafka.schema_registry.avro import AvroDeserializer
 from confluent_kafka.serialization import SerializationContext, MessageField
 from confluent_kafka.serialization import SerializationError
 
-BROKERS = 'rc1a-6ibie76edoio2ab7.mdb.yandexcloud.net:9091'
-TOPIC = 'topic-1'
-USER = 'practicumuser'
-PASSWORD = 'SecurePass2026'
-SR_URL = 'http://localhost:8081'
-CA = 'YandexInternalRootCA.crt'
+from config import config
+from logger import get_logger
 
-key_schema = {'type': 'string'}
-value_schema = {
+log = get_logger(__name__)
+
+KEY_SCHEMA = {'type': 'string'}
+VALUE_SCHEMA = {
     'type': 'record',
     'name': 'Message',
     'namespace': 'practicum.kafka',
     'fields': [{'name': 'message', 'type': 'string'}],
 }
 
-sr = SchemaRegistryClient({'url': SR_URL})
-key_deserializer = AvroDeserializer(sr, json.dumps(key_schema))
-value_deserializer = AvroDeserializer(sr, json.dumps(value_schema))
 
-consumer = Consumer({
-    'bootstrap.servers': BROKERS,
-    'group.id': 'avro-consumer',
-    'security.protocol': 'SASL_SSL',
-    'sasl.mechanism': 'SCRAM-SHA-512',
-    'sasl.username': USER,
-    'sasl.password': PASSWORD,
-    'ssl.ca.location': CA,
-    'auto.offset.reset': 'earliest',
-})
+class AvroConsumer:
+    """Консьюмер Avro-сообщений.
 
-consumer.subscribe([TOPIC])
-print('Avro consumer started, waiting for messages...', flush=True)
+    Вся инфраструктура (Schema Registry, десериализаторы, Kafka-консьюмер)
+    инициализируется в конструкторе, вне точки запуска.
+    """
 
-while True:
-    msg = consumer.poll(10)
-    if msg is None:
-        continue
-    if msg.error():
-        print('Consumer error: {}'.format(msg.error()))
-        continue
+    def __init__(self) -> None:
+        self._sr = SchemaRegistryClient({'url': config.schema_registry_url})
+        self._key_deserializer = AvroDeserializer(self._sr, json.dumps(KEY_SCHEMA))
+        self._value_deserializer = AvroDeserializer(self._sr, json.dumps(VALUE_SCHEMA))
 
+        self._consumer = Consumer({
+            'bootstrap.servers': config.kafka_brokers,
+            'group.id': config.consumer_group,
+            'security.protocol': config.security_protocol,
+            'sasl.mechanism': config.sasl_mechanism,
+            'sasl.username': config.kafka_user,
+            'sasl.password': config.kafka_password,
+            'ssl.ca.location': config.ca_file,
+            'auto.offset.reset': 'earliest',
+        })
+        self._consumer.subscribe([config.kafka_topic])
+
+    def run(self) -> None:
+        log.info("Avro consumer started, waiting for messages...")
+        while True:
+            msg = self._consumer.poll(10)
+            if msg is None:
+                continue
+            if msg.error():
+                log.error("Consumer error: %s", msg.error())
+                continue
+
+            try:
+                key = self._key_deserializer(
+                    msg.key(), SerializationContext(msg.topic(), MessageField.KEY))
+                value = self._value_deserializer(
+                    msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
+            except SerializationError as e:
+                log.warning("Skipping non-Avro message: %s", e)
+                continue
+
+            log.info("key=%s value=%s", key, value)
+
+    def close(self) -> None:
+        self._consumer.close()
+
+
+if __name__ == "__main__":
+    consumer = AvroConsumer()
     try:
-        key = key_deserializer(msg.key(), SerializationContext(msg.topic(), MessageField.KEY))
-        value = value_deserializer(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
-    except SerializationError as e:
-        print('Skipping non-Avro message: {}'.format(e))
-        continue
-    print('key={} value={}'.format(key, value))
+        consumer.run()
+    except KeyboardInterrupt:
+        log.info("Interrupted by user")
+    finally:
+        consumer.close()
