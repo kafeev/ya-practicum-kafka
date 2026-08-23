@@ -1,193 +1,28 @@
-﻿services:
-  kafka1:
-    image: confluentinc/cp-kafka:7.5.0
-    hostname: kafka1
+services:
+  nifi:
+    image: apache/nifi:1.21.0
+    container_name: nifi
     ports:
-      - "9095:9095"
+      - "8443:8443"
     environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_EARLY_START_LISTENERS: CONTROLLER
-      CLUSTER_ID: _J-6FEdzRW6FrSRnHsT11g
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9093,SSL://0.0.0.0:9095
-      KAFKA_ADVERTISED_LISTENERS: SSL://kafka1:9095
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SSL:SSL
-      KAFKA_INTER_BROKER_LISTENER_NAME: SSL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
-      # --- SSL ---
-      KAFKA_SSL_KEYSTORE_FILENAME: kafka1.keystore.jks
-      KAFKA_SSL_KEYSTORE_CREDENTIALS: credentials
-      KAFKA_SSL_KEY_CREDENTIALS: credentials
-      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.truststore.jks
-      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: credentials
-      KAFKA_SSL_CLIENT_AUTH: requested
-      KAFKA_SSL_PRINCIPAL_MAPPING_RULES: RULE:^CN=(.*?),.*$/$1/L
-      KAFKA_SSL_KEYSTORE_TYPE: PKCS12
-      KAFKA_SSL_TRUSTSTORE_TYPE: PKCS12
-      # --- Авторизация (ACL) ---
-      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
-      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: false
-      KAFKA_SUPER_USERS: User:admin;User:kafka1;User:kafka2;User:kafka3;User:ANONYMOUS
+      NIFI_WEB_HTTPS_PORT: "8443"
+      NIFI_JVM_HEAP: "1g"
+      SINGLE_USER_CREDENTIALS_USERNAME: "admin"
+      SINGLE_USER_CREDENTIALS_PASSWORD: "Admin123!nifi"
+      # NiFi подключается к Kafka по SASL_SSL; доверенный CA Yandex монтируется ниже.
+      NIFI_PROPS_LISTEN_HOST: "0.0.0.0"
     volumes:
-      - ./ssl/certs:/etc/kafka/secrets:ro
-      - ./ssl/config:/etc/kafka/ssl-config:ro
-    networks:
-      - kafka-network
-    healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9095", "--command-config", "/etc/kafka/ssl-config/admin.properties", "--list"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
-  kafka2:
-    image: confluentinc/cp-kafka:7.5.0
-    hostname: kafka2
+      - ./nifi-certs/nifi-truststore.jks:/opt/nifi/certs/nifi-truststore.jks:ro
+      - ./YandexInternalRootCA.crt:/opt/nifi/certs/YandexInternalRootCA.crt:ro
+    restart: unless-stopped
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: schema-registry
+    hostname: schema-registry
     ports:
-      - "9096:9096"
-    environment:
-      KAFKA_NODE_ID: 2
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_EARLY_START_LISTENERS: CONTROLLER
-      CLUSTER_ID: _J-6FEdzRW6FrSRnHsT11g
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9093,SSL://0.0.0.0:9096
-      KAFKA_ADVERTISED_LISTENERS: SSL://kafka2:9096
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SSL:SSL
-      KAFKA_INTER_BROKER_LISTENER_NAME: SSL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
-      # --- SSL ---
-      KAFKA_SSL_KEYSTORE_FILENAME: kafka2.keystore.jks
-      KAFKA_SSL_KEYSTORE_CREDENTIALS: credentials
-      KAFKA_SSL_KEY_CREDENTIALS: credentials
-      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.truststore.jks
-      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: credentials
-      KAFKA_SSL_CLIENT_AUTH: requested
-      KAFKA_SSL_PRINCIPAL_MAPPING_RULES: RULE:^CN=(.*?),.*$/$1/L
-      KAFKA_SSL_KEYSTORE_TYPE: PKCS12
-      KAFKA_SSL_TRUSTSTORE_TYPE: PKCS12
-      # --- Авторизация (ACL) ---
-      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
-      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: false
-      KAFKA_SUPER_USERS: User:admin;User:kafka1;User:kafka2;User:kafka3;User:ANONYMOUS
+      - "8081:8081"
+    entrypoint: ["/usr/bin/schema-registry-start"]
+    command: ["/etc/schema-registry/custom.properties"]
     volumes:
-      - ./ssl/certs:/etc/kafka/secrets:ro
-      - ./ssl/config:/etc/kafka/ssl-config:ro
-    networks:
-      - kafka-network
-    healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9096", "--command-config", "/etc/kafka/ssl-config/admin.properties", "--list"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
-  kafka3:
-    image: confluentinc/cp-kafka:7.5.0
-    hostname: kafka3
-    ports:
-      - "9097:9097"
-    environment:
-      KAFKA_NODE_ID: 3
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_EARLY_START_LISTENERS: CONTROLLER
-      CLUSTER_ID: _J-6FEdzRW6FrSRnHsT11g
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9093,SSL://0.0.0.0:9097
-      KAFKA_ADVERTISED_LISTENERS: SSL://kafka3:9097
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SSL:SSL
-      KAFKA_INTER_BROKER_LISTENER_NAME: SSL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
-      # --- SSL ---
-      KAFKA_SSL_KEYSTORE_FILENAME: kafka3.keystore.jks
-      KAFKA_SSL_KEYSTORE_CREDENTIALS: credentials
-      KAFKA_SSL_KEY_CREDENTIALS: credentials
-      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.truststore.jks
-      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: credentials
-      KAFKA_SSL_CLIENT_AUTH: requested
-      KAFKA_SSL_PRINCIPAL_MAPPING_RULES: RULE:^CN=(.*?),.*$/$1/L
-      KAFKA_SSL_KEYSTORE_TYPE: PKCS12
-      KAFKA_SSL_TRUSTSTORE_TYPE: PKCS12
-      # --- Авторизация (ACL) ---
-      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
-      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: false
-      KAFKA_SUPER_USERS: User:admin;User:kafka1;User:kafka2;User:kafka3;User:ANONYMOUS
-    volumes:
-      - ./ssl/certs:/etc/kafka/secrets:ro
-      - ./ssl/config:/etc/kafka/ssl-config:ro
-    networks:
-      - kafka-network
-    healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9097", "--command-config", "/etc/kafka/ssl-config/admin.properties", "--list"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
-  producer:
-    build:
-      context: .
-      dockerfile: producer/Dockerfile
-    depends_on:
-      kafka1:
-        condition: service_healthy
-    volumes:
-      - ./producer:/app
-      - ./ssl/certs:/etc/kafka/secrets:ro
-    working_dir: /app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
-      - BOOTSTRAP_SERVERS=kafka1:9095,kafka2:9096,kafka3:9097
-      - TOPIC=topic-1
-      - SECURITY_PROTOCOL=SSL
-      - SSL_CAFILE=/etc/kafka/secrets/ca-cert
-      - SSL_CERTFILE=/etc/kafka/secrets/client.producer-cert.pem
-      - SSL_KEYFILE=/etc/kafka/secrets/client.producer-key.pem
-      - SSL_CHECK_HOSTNAME=false
-    command: python -u producer.py
-    networks:
-      - kafka-network
-    restart: on-failure
-
-  consumer:
-    build:
-      context: .
-      dockerfile: consumer/Dockerfile
-    depends_on:
-      kafka1:
-        condition: service_healthy
-    volumes:
-      - ./consumer:/app
-      - ./ssl/certs:/etc/kafka/secrets:ro
-    working_dir: /app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
-      - BOOTSTRAP_SERVERS=kafka1:9095,kafka2:9096,kafka3:9097
-      - TOPIC=topic-1
-      - GROUP_ID=ssl-consumer-group
-      - SECURITY_PROTOCOL=SSL
-      - SSL_CAFILE=/etc/kafka/secrets/ca-cert
-      - SSL_CERTFILE=/etc/kafka/secrets/client.consumer-cert.pem
-      - SSL_KEYFILE=/etc/kafka/secrets/client.consumer-key.pem
-      - SSL_CHECK_HOSTNAME=false
-      - STARTUP_DELAY=10
-    command: python -u consumer.py
-    networks:
-      - kafka-network
-    restart: on-failure
-
-networks:
-  kafka-network:
-    driver: bridge
+      - ./YandexInternalRootCA.crt:/etc/schema-registry/YandexInternalRootCA.crt:ro
+      - ./schema-registry.custom.properties:/etc/schema-registry/custom.properties:ro

@@ -1,298 +1,369 @@
-# Kafka-кластер: 3 брокера + SSL + ACL (KRaft)
+# Задание 1. Развёртывание и настройка Kafka-кластера в Yandex Cloud
 
-## Содержание
 
-1. [Архитектура](#1-архитектура)
-2. [Структура проекта](#2-структура-проекта)
-3. [Предварительные требования](#3-предварительные-требования)
-4. [Шаг 1. Генерация сертификатов](#шаг-1-генерация-сертификатов)
-5. [Шаг 2. Запуск кластера](#шаг-2-запуск-кластера)
-6. [Шаг 3. Создание топиков](#шаг-3-создание-топиков)
-7. [Шаг 4. Настройка ACL](#шаг-4-настройка-acl)
-8. [Полная последовательность проверки](#шаг-5-полная-последовательность-проверки)
-9. [Остановка и перезапуск](#шаг-6-остановка-и-перезапуск)
-10. [Запуск на другом компьютере](#шаг-7-запуск-на-другом-компьютере)
-11. [Известные особенности и решения](#11-известные-особенности-и-решения)
+## 0. Общая информация о кластере
 
----
+| Параметр | Значение |
+| --- | --- |
+| Сервис | Yandex Managed Service for Apache Kafka® |
+| Хост брокера | `rc1a-6ibie76edoio2ab7.mdb.yandexcloud.net` |
+| Порт | `9091` (внешний SSL-эндпоинт) |
+| Протокол безопасности | `SASL_SSL` |
+| Механизм аутентификации | `SCRAM-SHA-512` |
+| Пользователь | `practicumuser` |
+| Количество брокеров | 3 |
+| Корневой CA-сертификат | `YandexInternalRootCA.crt` (в корне репозитория) |
 
-## 1. Архитектура
+Используемый топик: **`topic-1`**.
 
-| Компонент | Описание |
-|---|---|
-| `kafka1`, `kafka2`, `kafka3` | Брокеры KRaft, роли `broker,controller` |
-| Контроллерный кворум | 3 узла (quorum voters) на PLAINTEXT-листенере `9093` |
-| SSL-листенер | порты `9095` / `9096` / `9097`, mTLS |
-| `producer` | Python-клиент (kafka-python), пишет в `topic-1` |
-| `consumer` | Python-клиент (kafka-python), читает из `topic-1` |
-| Авторизация | `StandardAuthorizer`, `allow.everyone.if.no.acl.found=false` |
-
-Схема листенеров брокера (например, kafka1):
-
-- `CONTROLLER://0.0.0.0:9093` — внутренний контрольный трафик, PLAINTEXT (только в контейнерной сети);
-- `SSL://0.0.0.0:9095` — клиентский и межброкерский трафик, SSL с взаимной аутентификацией.
-
-### Схема прав (ACL)
-
-| Топик | Продюсер (`User:producer`) | Консьюмер (`User:consumer`) |
-|---|---|---|
-| `topic-1` | DESCRIBE, READ, WRITE | DESCRIBE, READ |
-| `topic-2` | DESCRIBE, WRITE | DESCRIBE (читать **не может**) |
-| Группа `*` | — | DESCRIBE, READ |
-
-Суперпользователи (`KAFKA_SUPER_USERS`): `User:admin`, `User:kafka1`, `User:kafka2`,
-`User:kafka3`, `User:ANONYMOUS`.
+Клиентское подключение (Python) реализовано в `producer.py` и `consumer.py`
+(библиотека `kafka-python`, см. `requirements.txt`).
 
 ---
 
-## 2. Структура проекта
+## Шаг 1. Развёртывание Kafka
 
-```
-.
-├── docker-compose.yaml          # кластер (3 брокера) + producer + consumer
-├── producer/
-│   ├── Dockerfile
-│   ├── requirements.txt         # kafka-python==2.0.2
-│   └── producer.py              # шлёт JSON-сообщения в топик
-├── consumer/
-│   ├── Dockerfile
-│   └── consumer.py              # читает сообщения из топика
-├── ssl/
-│   ├── generate-certs.sh        # генерация CA, keystore, truststore, PEM
-│   ├── certs/                   # сгенерированные сертификаты
-│   └── config/
-│       ├── admin.properties     # SSL-конфиг админа для утилит (kafka-acls, ...)
-│       ├── producer.properties  # SSL-конфиг клиента-продюсера
-│       ├── consumer.properties  # SSL-конфиг клиента-консьюмера
-│       ├── create-topics.sh     # создание топиков (отдельный скрипт)
-│       └── setup-acls.sh        # настройка ACL (отдельный скрипт)
-```
+Кластер развёрнут в Yandex Cloud через Managed Service for Apache Kafka® с
+**3 брокерами** в разных зонах доступности для отказоустойчивости.
 
----
+![kafka-nit](/picts/kafka-cloud-init.png)
 
-## 3. Требования для запуска проекта
+### Параметры кластера
 
-- Docker с Docker Compose
-- `openssl` и `keytool` (JDK) — только для генерации сертификатов
+- `default.replication.factor = 3` — репликация по умолчанию равна числу брокеров.
+- `min.insync.replicas = 2` — запись подтверждается после синхронизации с 2 репликами (допускает отказ 1 брокера без потери данных).
+- `num.partitions = 3` — число партиций по умолчанию.
+- `auto.create.topics.enable = false` — топики создаются явно.
 
----
+## Шаг 2. Настройка репликации и хранения данных
 
-## Шаг 1. Генерация сертификатов
+### Создание топика
 
-Сертификаты уже сгенерированы и лежат в `ssl/certs/` (каталог игнорируется git).
+![kafka-topic](/picts/topic-created.png)
 
-Если хотчется сгенерировать заново можно запустить скрипт:
+### Вывод `kafka-topics.sh --describe`
 
-```bash
-docker run --rm -v ${PWD}/ssl:/ssl -w /ssl confluentinc/cp-kafka:7.5.0 bash generate-certs.sh
-```
+Запускал через docker образ
 
-Скрипт создаёт:
 
-- самоподписанный CA (`ca-cert`, `ca-key`);
-- `kafka.truststore.jks` — общий truststore брокеров и клиентов;
-- `kafka{1..3}.keystore.jks` — keystore брокеров с SAN `DNS:kafkaN`;
-- `client.{producer,consumer,admin}.keystore.jks` — keystore клиентов;
-- `client.{producer,consumer,admin}-{cert,key}.pem` — PEM для Python-клиентов.
+![topic-describe](picts/kafka-topic-describe.png)
 
-Пароль всех хранилищ по умолчанию: `kafka123` (он же в `credentials`).
-
-> **Важно.** 
-> 
-> CN сертификата клиента становится принципалом в ACL.
-> 
-> Для `client.producer` CN = `producer` → принципал `User:producer`, и т.д.
+> Команда выполняется из Docker-образа `confluentinc/cp-kafka:7.6.0`
+> (утилита `kafka-topics` там лежит по пути `/usr/bin/kafka-topics`):
+>
+> ```bash
+> docker run --rm --workdir /config \
+>   -v ${PWD}/config:/config \
+>   -v ${PWD}/YandexInternalRootCA.crt:/config/YandexInternalRootCA.crt:ro \
+>   confluentinc/cp-kafka:7.6.0 \
+>   /usr/bin/kafka-topics \
+>     --bootstrap-server rc1a-6ibie76edoio2ab7.mdb.yandexcloud.net:9091 \
+>     --command-config /config/client.properties \
+>     --describe --topic topic-1
+> ```
+>
+> Фактический скриншот вывода: `picts/topic-all-messages.png`
+> (либо добавьте отдельный `picts/topic-describe.png`).
 
 ---
 
-## Шаг 2. Запуск кластера
+## Шаг 3. Настройка Schema Registry
+
+Confluent Schema Registry развёрнут локально в Docker и доступен по
+`http://localhost:8081`.
+
+### Подготовка в Yandex Cloud (один раз)
+
+Confluent Schema Registry хранит схемы в служебном топике `_schemas`. Его
+нужно создать заранее и выдать права пользователю `registry`. Команды —
+в `scripts/setup-registry.sh` (нужны утилита `yc` и переменные
+`CLUSTER_ID`, `REGISTRY_PASSWORD`):
 
 ```bash
-docker compose up -d --build
+# 1) создать пользователя registry
+yc managed-kafka user create <CLUSTER_ID> --name registry --password <REGISTRY_PASSWORD>
+
+# 2) создать топик _schemas (1 партиция, политика compact)
+yc managed-kafka topic create <CLUSTER_ID> --name _schemas \
+  --partitions 1 --replication-factor 3 --cleanup-policy CLEANUP_POLICY_COMPACT
+
+# 3) выдать registry права ACCESS_ROLE_PRODUCER и ACCESS_ROLE_CONSUMER на _schemas
+yc managed-kafka topic grant-permission <CLUSTER_ID> --topic-name _schemas --user-name registry --role ACCESS_ROLE_PRODUCER
+yc managed-kafka topic grant-permission <CLUSTER_ID> --topic-name _schemas --user-name registry --role ACCESS_ROLE_CONSUMER
 ```
 
-Проверка, что все брокеры поднялись и healthy:
+`<CLUSTER_ID>` получить командой `yc managed-kafka cluster list`.
+Пароль `<REGISTRY_PASSWORD>` должен совпадать с тем, что указан в
+`docker-compose.yaml` (сервис `schema-registry`).
 
-![alt text](picts/image.png)
 
-Три брокера должны иметь статус `Up ... (healthy)`.
+### Развёртывание локально через Docker
 
-> **Первый запуск / после `down` без `-v`:** топики и ACL хранятся внутри
-> контейнеров брокеров и исчезают при удалении контейнеров — выполняйте шаги 3 и 4.
+Используется `docker-compose.yaml` (сервис `schema-registry`, образ
+`confluentinc/cp-schema-registry:7.6.0`). Schema Registry подключается к
+кластеру Yandex по `SASL_SSL`/`SCRAM-SHA-512` от имени пользователя `registry`
+и хранит схемы в `_schemas`.
+
+
+
+```bash
+docker compose up -d schema-registry
+
+# проверка доступности
+curl http://localhost:8081/
+```
+
+вывод
+```bash
+PS C:\Practicum\kafka\ya-practicum-kafka> curl http://localhost:8081/
+
+Предупреждение безопасности: риск выполнения сценария                                                                                                                                                                                                      
+Invoke-WebRequest анализирует содержимое веб-страницы. При анализе страницы может выполняться код сценария на веб-странице.                                                                                                                                
+      РЕКОМЕНДУЕМОЕ ДЕЙСТВИЕ:                                                                                                                                                                                                                              
+      Используйте параметр -UseBasicParsing, чтобы предотвратить выполнение кода сценария.                                                                                                                                                                 
+
+      Продолжить?
+    
+[Y] Да - Y  [A] Да для всех - A  [N] Нет - N  [L] Нет для всех - L  [S] Приостановить - S  [?] Справка (значением по умолчанию является "N"): y
+
+
+StatusCode        : 200
+StatusDescription : OK
+Content           : {123, 125}
+RawContent        : HTTP/1.1 200 OK
+                    X-Request-ID: 87416d16-63c4-4210-a984-17913479d5dc
+                    Vary: Accept-Encoding, User-Agent
+                    Content-Length: 2
+                    Content-Type: application/vnd.schemaregistry.v1+json
+                    Date: Sat, 22 Aug 2026 ...
+Headers           : {[X-Request-ID, 87416d16-63c4-4210-a984-17913479d5dc], [Vary, Accept-Encoding, User-Agent], [Content-Length, 2], [Content-Type, application/vnd.schemaregistry.v1+json]...}
+RawContentLength  : 2
+```
+
+Настройки подключения (bootstrap, SASL, CA, пароль `registry`) лежат в
+`schema-registry.custom.properties`. CA-сертификат Yandex монтируется в
+контейнер как `/etc/schema-registry/YandexInternalRootCA.crt` (PEM truststore).
+
+Если группа `schema-registry` в кластере «зависла» из-за другого SR, её можно
+сбросить скриптом `scripts/reset_sr_group.py` (Kafka Admin API).
+
+### Файл схемы
+
+Схема данных (Avro) — файл **`schema.avsc`** (соответствует сообщению продюсера
+`{"message": "..."}`):
+
+```json
+{
+  "type": "record",
+  "name": "Message",
+  "namespace": "practicum.kafka",
+  "fields": [ { "name": "message", "type": "string" } ]
+}
+```
+
+### Регистрация схемы
+
+Схема регистрируется **автоматически** при первой отправке Avro-сообщения
+продюсером `avro_producer.py` (субъект значения — `topic-1-value`, ключа —
+`topic-1-key`). Файл схемы — `schema.avsc`. Зарегистрировать схему вручную
+также можно скриптом `scripts/register-schema.sh`.
+
+
+### Проверка регистрации схем
+
+![producer-consumer](picts/consumer-read-messages.png)
+
+Проверить ответы Schema Registry:
+```bash
+curl http://localhost:8081/subjects
+# ["topic-1-value"]
+
+curl -X GET http://localhost:8081/subjects/topic-1-value/versions
+# [1]
+```
+![schema](/picts/schema-registry-versions.png)
+
+
+## Шаг 4. Проверка работы Kafka
+
+
+Подключается по `SASL_SSL`/`SCRAM-SHA-512`, отправляет одно сообщение
+`{"message": "hello from producer"}` с ключом `key-1` в топик `topic-1`.
+
+![producer](/picts/producer-sent-message.png)
 
 ---
 
-## Шаг 3. Создание топиков
-Так как все скрипты были уже скопированы на брокеры kafka, то можно запускать скрипт создания топиков прямо изнутри.
-Можно работать с любой kafa1\kafka2\kafka3:
-
-```bash
-docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
-```
-
-Скрипт создаёт `topic-1` и `topic-2` (3 партиции, RF=3) и выводит их список.
-
----
-
-## Шаг 4. Настройка ACL
-Скрипт для срздания политик доступа (ACL) также скопирован на каждый брокер.
-
-Так что можно запускать на любом:
-
-```bash
-docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
-```
-
-Скрипт выставляет ACL по схеме из [раздела 1](#1-архитектура) и выводит их список.
-
-> Оба скрипта монтируются в брокеры из `ssl/config` (каталог `/etc/kafka/ssl-config`).
-
----
-
-## Шаг 5. Полная последовательность проверки
-
-### 5.0 Проверка автоматических клиентов (topic-1)
-
-Продюсер и консьюмер из `docker-compose` работают с `topic-1` постоянно.
-
-```bash
-# продюсер шлёт сообщения каждые 2 секунды
-docker compose logs -f producer
-
-# консьюмер их читает (topic-1)
-docker compose logs -f consumer
-```
-
-В логах консьюмера появляются блоки `===== RECEIVED MESSAGE =====`.
-
-![alt text](picts/consumer-log-recievedmessage.png)
-
-### 5.1 Продюсер пишет в topic-1 и topic-2 (у него READ/WRITE/DESCRIBE на оба)
-
-![alt text](picts/producer-write-message.png)
-
-```bash
-docker compose run --rm -e TOPIC=topic-2 producer python -u -c "
-import os, ssl
-from kafka import KafkaProducer
-ctx = ssl.create_default_context(cafile='/etc/kafka/secrets/ca-cert')
-ctx.load_cert_chain('/etc/kafka/secrets/client.producer-cert.pem','/etc/kafka/secrets/client.producer-key.pem')
-ctx.check_hostname = False
-p = KafkaProducer(bootstrap_servers=['kafka1:9095','kafka2:9096','kafka3:9097'], value_serializer=lambda v: v.encode(), security_protocol='SSL', ssl_context=ctx)
-print('topic-1:', p.send('topic-1', value='t1').get(timeout=15))
-print('topic-2:', p.send('topic-2', value='t2').get(timeout=15))
-p.close()
-"
-```
-
-Оба вызова должны вернуть `RecordMetadata` (успех), т.е. продюсер может писать
-и в `topic-1`, и в `topic-2`.
-
-### 5.2 Консьюмер читает topic-1 (у него READ)
-
-Автоматический консьюмер уже читает `topic-1` — см. пункт 5.0.
-
-### 5.3 Консьюмер НЕ может читать topic-2 (только DESCRIBE) — негативный тест
-
-```bash
-docker compose run --rm -e TOPIC=topic-2 consumer python -u consumer.py
-```
-
-Ожидаемый результат — ошибка:
-
-```
-kafka.errors.TopicAuthorizationFailedError: [Error 29] TopicAuthorizationFailedError: {'topic-2'}
-```
 
 
-![alt text](picts/consumer-topic-2-error.png)
+## Структура репозитория
 
-и в логах `WARNING:...Not authorized to read from topic topic-2.`
-Это подтверждает, что на `topic-2` у консьюмера только `DESCRIBE`.
-
-### 5.4 Просмотр текущих ACL
-
-```bash
-docker compose exec kafka1 kafka-acls --bootstrap-server kafka1:9095 --command-config /etc/kafka/ssl-config/admin.properties --list
-```
-![alt text](picts/acl.png)
+| Файл | Назначение |
+| --- | --- |
+| `readme.md` | описание шагов задания (этот файл) |
+| `producer.py` | продюсер тестовых сообщений |
+| `consumer.py` | консьюмер тестовых сообщений |
+| `requirements.txt` | зависимости Python (`kafka-python`) |
+| `schema.avsc` | Avro-схема данных |
+| `config/client.properties` | настройки Kafka CLI (SASL_SSL) |
+| `scripts/create-topic.sh` | создание топика |
+| `scripts/describe-topic.sh` | описание топика |
+| `scripts/register-schema.sh` | регистрация схемы в Schema Registry (curl) |
+| `scripts/setup-registry.sh` | создание пользователя `registry` и топика `_schemas` в Yandex |
+| `docker-compose.yaml` | локальный запуск Confluent Schema Registry и Apache NiFi (Docker) |
+| `schema-registry.custom.properties` | конфиг SR: своя группа `schema-registry-standalone` (обход конфликта с другим SR) |
+| `scripts/reset_sr_group.py` | сброс «зависшей» группы `schema-registry` в кластере (Kafka Admin API) |
+| `avro_producer.py` | Avro-продюсер (регистрирует схему в SR, пишет в `topic-1`) |
+| `avro_consumer.py` | Avro-консьюмер (читает из `topic-1` через SR) |
+| `YandexInternalRootCA.crt` | корневой CA для SSL |
+| `nifi-certs/nifi-truststore.jks` | JKS-truststore (пароль `changeit`, alias `yandexca`) для NiFi SSL Context Service |
+| `nifi_producer.py` | продюсер для NiFi-демо (пишет JSON в `topic-1`) |
+| `nifi_consumer.py` | консьюмер для NiFi-демо (читает из `topic-1`) |
+| `scripts/nifi_setup.ps1`, `nifi_recreate.ps1`, `nifi_final.ps1` | скрипты настройки потока NiFi через REST API |
+| `picts/*.png` | скриншоты проверки (продюсер/консьюмер/топик/NiFi) |
 
 ---
 
-## Шаг 6. Остановка и перезапуск
+# Задание 2. Интеграция Kafka с Apache NiFi
 
-Остановить:
+## 0. Что реализовано
 
-```bash
-docker compose down
+NiFi (Docker-образ `apache/nifi:1.21.0`, HTTPS на порту `8443`) подключается к
+тому же кластеру Yandex Kafka по `SASL_SSL`/`SCRAM-SHA-512` и **потребляет**
+сообщения из топика `topic-1`. Поток (flow) в корневой Process Group:
+
+```
+ConsumeKafka_2_6  ──success──▶  LogAttribute  ──success──▶  PutFile
+ (topic-1, SASL_SSL,                                   (/opt/nifi/data/consumed)
+  SCRAM-SHA-512,
+  SSL Context Service)
 ```
 
-Запустить снова (топики/ACL не персистятся):
+- **ConsumeKafka_2_6** — читает из `topic-1` группой `nifi-consumer-group`,
+  security-protocol `SASL_SSL`, SASL-mechanism `SCRAM-SHA-512`, пользователь
+  `practicumuser`, SSL Context Service = `YandexKafkaSSL`.
+- **LogAttribute** — логирует атрибуты каждого FlowFile (видно в `nifi-app.log`).
+- **PutFile** — пишет тело каждого сообщения в файл в каталог
+  `/opt/nifi/data/consumed` внутри контейнера NiFi (подтверждение записи данных).
+
+## Шаг 1. Подготовка truststore для NiFi
+
+NiFi не умеет напрямую грузить PEM-сертификат Yandex как truststore, поэтому
+сгенерирован JKS-truststore из `YandexInternalRootCA.crt` (утилитой `keytool`
+внутри контейнера NiFi, т.к. на хосте нет Java):
 
 ```bash
-docker compose up -d --build
-docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
-docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
+# сгенерировать nifi-certs/nifi-truststore.jks
+docker run --rm --entrypoint keytool apache/nifi:1.21.0 \
+  -importcert -noprompt -trustcacerts \
+  -alias yandexca -file /tmp/ca.crt -keystore /tmp/nifi-truststore.jks \
+  -storepass changeit \
+  -v /path/to/YandexInternalRootCA.crt:/tmp/ca.crt \
+  -v ${PWD}/nifi-certs:/tmp
 ```
 
-Полностью удалить вместе с данными:
+Файл монтируется в контейнер NiFi как `/opt/nifi/certs/nifi-truststore.jks`.
+
+## Шаг 2. Запуск NiFi
+
+`docker-compose.yaml` (сервис `nifi`):
+- образ `apache/nifi:1.21.0`, порт `8443:8443` (UI — `https://localhost:8443/nifi/`),
+- single-user-режим, логин/пароль `admin` / `Admin123!nifi`,
+- монтируются `nifi-certs/` (truststore) и `YandexInternalRootCA.crt`.
 
 ```bash
-docker compose down -v
+docker compose up -d nifi
 ```
+![](picts/nifi-container.running.png)
 
----
+![nifi](picts/nifi-ready.png)
 
-## 10. Запуск на другом компьютере
 
-Склонируйте репозиторий и запустите из его корня — весь код, сертификаты
-(`ssl/certs/`) и скрипты уже входят в репозиторий:
 
-```bash
-git clone <URL-репозитория> ya-practicum-kafka
-cd ya-practicum-kafka
+## Шаг 3. Настройка SSL Context Service
 
-# 1) собрать и поднять кластер
-docker compose up -d --build
+Через UI или REST API создаётся контроллер-сервис
+`org.apache.nifi.ssl.StandardSSLContextService` (имя `YandexKafkaSSL`):
 
-# 2) создать топики
-docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
+| Свойство | Значение |
+| --- | --- |
+| Truststore Filename | `/opt/nifi/certs/nifi-truststore.jks` |
+| Truststore Password | `changeit` |
+| Truststore Type | `JKS` |
+| SSL Protocol | `TLS` |
 
-# 3) настроить ACL
-docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
+Сервис переведён в состояние **ENABLED** (проверено: `status.runStatus=ENABLED`).
 
-# 4) проверка (см. раздел 5)
-docker compose logs -f producer
-docker compose logs -f consumer
-```
+## Шаг 4. Настройка процессоров ConsumeKafka → LogAttribute → PutFile
 
-Так как сертификаты, ключи и скрипты хранятся в репозитории (`ssl/`),
-отдельной генерации на целевой машине не требуется.
+ConsumeKafka_2_6 (важные свойства — **реальные** имена дескрипторов):
 
----
+| Свойство | Значение |
+| --- | --- |
+| `bootstrap.servers` | `rc1a-6ibie76edoio2ab7.mdb.yandexcloud.net:9091` |
+| `topic` | `topic-1` |
+| `group.id` | `nifi-consumer-group` |
+| `security.protocol` | `SASL_SSL` |
+| `sasl.mechanism` | `SCRAM-SHA-512` |
+| `sasl.username` | `practicumuser` |
+| `sasl.password` | `SecurePass2026` |
+| `auto.offset.reset` | `latest` |
+| `ssl.context.service` | `YandexKafkaSSL` |
 
-## 11. Известные особенности и решения
+PutFile: `Directory=/opt/nifi/data/consumed`, `Conflict Resolution Strategy=replace`,
+отношения `success`/`failure` авто-завершены. Все процессоры **RUNNING** и **VALID**.
 
-**`AuthorizerNotReadyException` на старте (VOTE/FETCH).**
-Контроллерный листенер `CONTROLLER` использует PLAINTEXT, и запросы по нему
-идут с принципалом `Anonymous`, а авторизатор ещё «не готов». Решение —
-добавить `User:ANONYMOUS` в `KAFKA_SUPER_USERS` и задать
-`KAFKA_EARLY_START_LISTENERS: CONTROLLER`.
 
-**Разделитель в `KAFKA_SUPER_USERS` — только `;`.**
-`StandardAuthorizer.getConfiguredSuperUsers()` разбивает список по `;`.
-Значение через запятую парсится как один принципиал и не работает.
 
-**`[Error 31] ClusterAuthorizationFailedError` у продюсера.**
-Идемпотентный продюсер шлёт `InitProducerId`, что требует операцию
-`IDEMPOTENT_WRITE` на ресурсе CLUSTER. В стенде kafka-python==2.0.2, которая
-идемпотентность не использует, поэтому отдельной CLUSTER-ACL не нужно.
+## Шаг 5. Проверка (Kafka ↔ NiFi)
 
-**`KAFKA_AUTO_CREATE_TOPICS_ENABLE: false`.**
-Автосоздание топиков выключено, чтобы лишние топики не создавались
-неавторизованными клиентами.
+1. Отправляем сообщения продюсером NiFi-демо:
+   ```bash
+   python nifi_producer.py
+   # sent {'source': 'nifi-integration-demo', 'message': 'event-0', ...}  x5
+   ```
+2. NiFi потребляет их (группа `nifi-consumer-group`, auto.offset.reset=latest —
+   читает только **новые** сообщения, пришедшие после запуска ConsumeKafka):
+   - `nifi-app.log`: `[Consumer clientId=...groupId=nifi-consumer-group]
+     Successfully joined group ... Assignment(partitions=[topic-1-0 ... topic-1-11])`
+   - `LogAttribute` логирует каждый FlowFile (`size=75` байт — наше JSON-сообщение).
+3. PutFile пишет файлы в `/opt/nifi/data/consumed` (по одному на сообщение):
+   ```bash
+   docker exec nifi ls -la /opt/nifi/data/consumed
+   # -rw-r--r-- 1 nifi nifi 75 ... d9c25ebc-...
+   docker exec nifi cat /opt/nifi/data/consumed/<uuid>
+   # {"source": "nifi-integration-demo", "message": "event-0", "ts": ...}
+   ```
+4. Тот же топик можно читать штатным `kafka-console-consumer.sh`
+   (образ `cp-kafka:7.6.0`):
 
-**Безопасность секретов.**
-Каталог `ssl/certs/` содержит приватные ключи и пароли хранилищ —
-убедитесь, что репозиторий (remote) приватный. Каталог `temp/` из git исключён
-(`.gitignore`).
+   ```bash
+   # в одном терминале — слушаем НОВЫЕ сообщения (режим latest, без --from-beginning,
+   # чтобы не падать на старых Avro-байтах из Задания 1)
+   docker run --rm --workdir /config \
+     -v ${PWD}/config:/config \
+     -v ${PWD}/YandexInternalRootCA.crt:/config/YandexInternalRootCA.crt:ro \
+     confluentinc/cp-kafka:7.6.0 \
+     /usr/bin/kafka-console-consumer \
+       --bootstrap-server rc1a-6ibie76edoio2ab7.mdb.yandexcloud.net:9091 \
+       --consumer.config /config/client.properties \
+       --topic topic-1
+   ```
+   В другом терминале запускаем `python nifi_producer.py` — в первом
+   терминале появляются JSON-строки `{"source": "nifi-integration-demo", ...}`.
+   Это и есть «Kafka-топик с поступающими данными» (скриншот для отчёта).
+
+Результ:
+![ready](picts/nifi-check-work.png)
+
+Подтверждение записи в длокальное хранилище 
+
+![nifi-local-write](picts/nifi-local-write.png)
+
+**Результат:** Apache NiFi успешно подключён к Kafka-кластеру Yandex,
+аутентифицируется по `SCRAM-SHA-512` поверх `SASL_SSL`, потребляет сообщения из
+`topic-1` и сохраняет их (логи `nifi-app.log` + файлы в `/opt/nifi/data/consumed`
+— подтверждение успешной записи данных).
+
+
+
