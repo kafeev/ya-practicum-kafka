@@ -8,9 +8,21 @@
 
 from typing import Any, Dict
 
+import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Schema Registry-клиент (confluent-kafka) использует httpx, который по
+# умолчанию учитывает системный прокси Windows ДАЖЕ для localhost. Из-за этого
+# запросы к локально поднятому SR (через docker-compose) уходят в прокси и
+# получают 503. Исключаем localhost/127.0.0.1 из проксирования — это стандартный,
+# поддерживаемый механизм (в отличие от монки-патча внутреннего _RestClient).
+for _hp in ("no_proxy", "NO_PROXY"):
+    _existing = os.environ.get(_hp, "")
+    if "localhost" not in _existing:
+        os.environ[_hp] = (_existing + ",localhost,127.0.0.1").strip(",")
 
 
 class Config:

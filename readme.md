@@ -94,12 +94,12 @@ yc managed-kafka topic grant-permission <CLUSTER_ID> --topic-name _schemas --use
 
 `<CLUSTER_ID>` получить командой `yc managed-kafka cluster list`.
 Пароль `<REGISTRY_PASSWORD>` должен совпадать с тем, что указан в
-`docker-compose.schema-registry.yml`.
+`docker-compose.yaml` (сервис `schema-registry`).
 
 
 ### Развёртывание локально через Docker
 
-Используется `docker-compose.schema-registry.yml` (образ
+Используется `docker-compose.yaml` (сервис `schema-registry`, образ
 `confluentinc/cp-schema-registry:7.6.0`). Schema Registry подключается к
 кластеру Yandex по `SASL_SSL`/`SCRAM-SHA-512` от имени пользователя `registry`
 и хранит схемы в `_schemas`.
@@ -107,7 +107,7 @@ yc managed-kafka topic grant-permission <CLUSTER_ID> --topic-name _schemas --use
 
 
 ```bash
-docker compose -f docker-compose.schema-registry.yml up -d
+docker compose up -d schema-registry
 
 # проверка доступности
 curl http://localhost:8081/
@@ -168,12 +168,6 @@ RawContentLength  : 2
 `topic-1-key`). Файл схемы — `schema.avsc`. Зарегистрировать схему вручную
 также можно скриптом `scripts/register-schema.sh`.
 
-> **Совместимость клиента:** в свежих версиях `confluent-kafka` (2.x)
-> Schema Registry-клиент использует `httpx`, который некорректно работает с
-> Jetty в Schema Registry 7.6.0 (все запросы возвращают HTTP 503). Для
-> обхода модуль `sr_http.py` подменяет HTTP-транспорт клиента на `requests`
-> (который работает корректно). `avro_producer.py` и `avro_consumer.py`
-> импортируют `sr_http` первой строкой.
 
 ### Проверка регистрации схем
 
@@ -216,14 +210,12 @@ curl -X GET http://localhost:8081/subjects/topic-1-value/versions
 | `scripts/describe-topic.sh` | описание топика |
 | `scripts/register-schema.sh` | регистрация схемы в Schema Registry (curl) |
 | `scripts/setup-registry.sh` | создание пользователя `registry` и топика `_schemas` в Yandex |
-| `docker-compose.schema-registry.yml` | локальный запуск Confluent Schema Registry (Docker) |
+| `docker-compose.yaml` | локальный запуск Confluent Schema Registry и Apache NiFi (Docker) |
 | `schema-registry.custom.properties` | конфиг SR: своя группа `schema-registry-standalone` (обход конфликта с другим SR) |
 | `scripts/reset_sr_group.py` | сброс «зависшей» группы `schema-registry` в кластере (Kafka Admin API) |
 | `avro_producer.py` | Avro-продюсер (регистрирует схему в SR, пишет в `topic-1`) |
 | `avro_consumer.py` | Avro-консьюмер (читает из `topic-1` через SR) |
-| `sr_http.py` | подмена HTTP-транспорта SR-клиента на `requests` (обход бага `httpx` ↔ SR 7.6.0) |
 | `YandexInternalRootCA.crt` | корневой CA для SSL |
-| `docker-compose.nifi.yml` | запуск Apache NiFi 1.21.0 (HTTPS 8443) в Docker |
 | `nifi-certs/nifi-truststore.jks` | JKS-truststore (пароль `changeit`, alias `yandexca`) для NiFi SSL Context Service |
 | `nifi_producer.py` | продюсер для NiFi-демо (пишет JSON в `topic-1`) |
 | `nifi_consumer.py` | консьюмер для NiFi-демо (читает из `topic-1`) |
@@ -274,13 +266,13 @@ docker run --rm --entrypoint keytool apache/nifi:1.21.0 \
 
 ## Шаг 2. Запуск NiFi
 
-`docker-compose.nifi.yml`:
+`docker-compose.yaml` (сервис `nifi`):
 - образ `apache/nifi:1.21.0`, порт `8443:8443` (UI — `https://localhost:8443/nifi/`),
 - single-user-режим, логин/пароль `admin` / `Admin123!nifi`,
 - монтируются `nifi-certs/` (truststore) и `YandexInternalRootCA.crt`.
 
 ```bash
-docker compose -f docker-compose.nifi.yml up -d
+docker compose up -d nifi
 ```
 ![](picts/nifi-container.running.png)
 

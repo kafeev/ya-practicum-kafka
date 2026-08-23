@@ -15,3 +15,14 @@ services:
       - ./nifi-certs/nifi-truststore.jks:/opt/nifi/certs/nifi-truststore.jks:ro
       - ./YandexInternalRootCA.crt:/opt/nifi/certs/YandexInternalRootCA.crt:ro
     restart: unless-stopped
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: schema-registry
+    hostname: schema-registry
+    ports:
+      - "8081:8081"
+    entrypoint: ["/usr/bin/schema-registry-start"]
+    command: ["/etc/schema-registry/custom.properties"]
+    volumes:
+      - ./YandexInternalRootCA.crt:/etc/schema-registry/YandexInternalRootCA.crt:ro
+      - ./schema-registry.custom.properties:/etc/schema-registry/custom.properties:ro

@@ -1,6 +1,4 @@
 import json
-import sr_http  # noqa: F401  (monkeypatches Schema Registry client to use requests instead of httpx)
-
 from confluent_kafka import Producer
 from confluent_kafka.schema_registry import SchemaRegistryClient, topic_subject_name_strategy
 from confluent_kafka.schema_registry.avro import AvroSerializer

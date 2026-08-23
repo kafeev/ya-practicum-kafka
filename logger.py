@@ -24,6 +24,11 @@ def configure(level: int = logging.INFO, fmt: str = _DEFAULT_FORMAT) -> None:
     handler.setFormatter(logging.Formatter(fmt))
     root.addHandler(handler)
 
+    # httpx/urllib3 шумят DEBUG/INFO-логами о каждом HTTP-запросе к Schema Registry;
+    # поднимаем уровень, чтобы не засорять консоль приложения.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
     _configured = True
 
 
