@@ -21,15 +21,15 @@ REPLICATION=${REPLICATION:-3}
 
 echo ">>> Создание топиков"
 kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
-  --create --if-not-exists --topic topic-1 --partitions "$PARTITIONS" --replication-factor "$REPLICATION"
+  --create --if-not-exists --topic topic-1 --partitions "$PARTITIONS" --replication-factor "$REPLICATION" --config min.insync.replicas=2
 kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
-  --create --if-not-exists --topic topic-2 --partitions "$PARTITIONS" --replication-factor "$REPLICATION"
+  --create --if-not-exists --topic topic-2 --partitions "$PARTITIONS" --replication-factor "$REPLICATION" --config min.insync.replicas=2
 
 # Топики аналитической платформы маркетплейса
 kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
-  --create --if-not-exists --topic products --partitions "$PARTITIONS" --replication-factor "$REPLICATION"
+  --create --if-not-exists --topic products --partitions "$PARTITIONS" --replication-factor "$REPLICATION" --config min.insync.replicas=2
 kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
-  --create --if-not-exists --topic client_requests --partitions "$PARTITIONS" --replication-factor "$REPLICATION"
+  --create --if-not-exists --topic client_requests --partitions "$PARTITIONS" --replication-factor "$REPLICATION" --config min.insync.replicas=2
 
 echo ""
 echo ">>> Топики:"

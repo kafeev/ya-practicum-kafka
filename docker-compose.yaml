@@ -18,6 +18,7 @@
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
       # --- SSL ---
       KAFKA_SSL_KEYSTORE_FILENAME: kafka1.keystore.jks
@@ -63,6 +64,7 @@
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
       # --- SSL ---
       KAFKA_SSL_KEYSTORE_FILENAME: kafka2.keystore.jks
@@ -108,6 +110,7 @@
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
       # --- SSL ---
       KAFKA_SSL_KEYSTORE_FILENAME: kafka3.keystore.jks
@@ -333,6 +336,157 @@
       - ./ssl/certs:/opt/nifi/ssl:ro
     networks:
       - kafka-network
+
+  # ---------------------------------------------------------------------------
+  # Второй (резервный) Kafka-кластер для зеркалирования (Шаг 2, отказоустойчивость)
+  # Переиспользуются сертификаты kafka{1..3}, поэтому hostname-проверка отключена
+  # (KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM="").
+  # ---------------------------------------------------------------------------
+  backup1:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: backup1
+    ports:
+      - "9195:9195"
+    environment:
+      KAFKA_NODE_ID: 11
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_EARLY_START_LISTENERS: CONTROLLER
+      CLUSTER_ID: Bk9mLm3RtQ2pXyZ7WvE5aF
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 11@backup1:9193,12@backup2:9193,13@backup3:9193
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9193,SSL://0.0.0.0:9195
+      KAFKA_ADVERTISED_LISTENERS: SSL://backup1:9195
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SSL:SSL
+      KAFKA_INTER_BROKER_LISTENER_NAME: SSL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka1.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: credentials
+      KAFKA_SSL_KEY_CREDENTIALS: credentials
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: credentials
+      KAFKA_SSL_CLIENT_AUTH: requested
+      KAFKA_SSL_PRINCIPAL_MAPPING_RULES: RULE:^CN=(.*?),.*$/$1/L
+      KAFKA_SSL_KEYSTORE_TYPE: PKCS12
+      KAFKA_SSL_TRUSTSTORE_TYPE: PKCS12
+      KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: ""
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: false
+      KAFKA_SUPER_USERS: User:admin;User:kafka1;User:kafka2;User:kafka3;User:ANONYMOUS
+    volumes:
+      - ./ssl/certs:/etc/kafka/secrets:ro
+      - ./ssl/config:/etc/kafka/ssl-config:ro
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9195", "--command-config", "/etc/kafka/ssl-config/admin-backup.properties", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  backup2:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: backup2
+    environment:
+      KAFKA_NODE_ID: 12
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_EARLY_START_LISTENERS: CONTROLLER
+      CLUSTER_ID: Bk9mLm3RtQ2pXyZ7WvE5aF
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 11@backup1:9193,12@backup2:9193,13@backup3:9193
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9193,SSL://0.0.0.0:9196
+      KAFKA_ADVERTISED_LISTENERS: SSL://backup2:9196
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SSL:SSL
+      KAFKA_INTER_BROKER_LISTENER_NAME: SSL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka2.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: credentials
+      KAFKA_SSL_KEY_CREDENTIALS: credentials
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: credentials
+      KAFKA_SSL_CLIENT_AUTH: requested
+      KAFKA_SSL_PRINCIPAL_MAPPING_RULES: RULE:^CN=(.*?),.*$/$1/L
+      KAFKA_SSL_KEYSTORE_TYPE: PKCS12
+      KAFKA_SSL_TRUSTSTORE_TYPE: PKCS12
+      KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: ""
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: false
+      KAFKA_SUPER_USERS: User:admin;User:kafka1;User:kafka2;User:kafka3;User:ANONYMOUS
+    volumes:
+      - ./ssl/certs:/etc/kafka/secrets:ro
+      - ./ssl/config:/etc/kafka/ssl-config:ro
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9196", "--command-config", "/etc/kafka/ssl-config/admin-backup.properties", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  backup3:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: backup3
+    environment:
+      KAFKA_NODE_ID: 13
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_EARLY_START_LISTENERS: CONTROLLER
+      CLUSTER_ID: Bk9mLm3RtQ2pXyZ7WvE5aF
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 11@backup1:9193,12@backup2:9193,13@backup3:9193
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9193,SSL://0.0.0.0:9197
+      KAFKA_ADVERTISED_LISTENERS: SSL://backup3:9197
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SSL:SSL
+      KAFKA_INTER_BROKER_LISTENER_NAME: SSL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: false
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka3.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: credentials
+      KAFKA_SSL_KEY_CREDENTIALS: credentials
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: credentials
+      KAFKA_SSL_CLIENT_AUTH: requested
+      KAFKA_SSL_PRINCIPAL_MAPPING_RULES: RULE:^CN=(.*?),.*$/$1/L
+      KAFKA_SSL_KEYSTORE_TYPE: PKCS12
+      KAFKA_SSL_TRUSTSTORE_TYPE: PKCS12
+      KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: ""
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: false
+      KAFKA_SUPER_USERS: User:admin;User:kafka1;User:kafka2;User:kafka3;User:ANONYMOUS
+    volumes:
+      - ./ssl/certs:/etc/kafka/secrets:ro
+      - ./ssl/config:/etc/kafka/ssl-config:ro
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9197", "--command-config", "/etc/kafka/ssl-config/admin-backup.properties", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # MirrorMaker 2: дублирование products/client_requests из primary -> backup
+  mirror-maker:
+    image: confluentinc/cp-kafka:7.5.0
+    entrypoint: ["/bin/bash", "-c", "exec kafka-run-class org.apache.kafka.connect.mirror.MirrorMaker /etc/kafka/mm2.properties"]
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      backup1:
+        condition: service_healthy
+    volumes:
+      - ./ssl/certs:/etc/kafka/secrets:ro
+      - ./mm2/mm2.properties:/etc/kafka/mm2.properties:ro
+    environment:
+      - KAFKA_LOG4J_OPTS=-Dlog4j.configuration=file:/etc/kafka/connect-log4j.properties
+    networks:
+      - kafka-network
+    restart: on-failure
 
 networks:
   kafka-network:
