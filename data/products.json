@@ -1,0 +1,232 @@
+[
+  {
+    "product_id": "1001",
+    "name": "Умные часы XYZ Watch Pro",
+    "description": "Умные часы с мониторингом здоровья, GPS и уведомлениями о звонках и сообщениях.",
+    "price": { "amount": 4999.99, "currency": "RUB" },
+    "category": "Электроника",
+    "brand": "XYZ",
+    "stock": { "available": 150, "reserved": 20 },
+    "sku": "XYZ-WATCH-PRO",
+    "tags": ["умные часы", "гаджеты", "технологии", "GPS"],
+    "images": [
+      { "url": "https://example.com/images/watch_pro_front.jpg", "alt": "Умные часы XYZ - вид спереди" },
+      { "url": "https://example.com/images/watch_pro_side.jpg", "alt": "Умные часы XYZ - вид сбоку" }
+    ],
+    "specifications": { "weight": "50g", "dimensions": "42mm x 36mm x 10mm", "battery_life": "24 hours", "water_resistance": "IP68" },
+    "created_at": "2023-10-01T12:00:00Z",
+    "updated_at": "2023-10-10T15:30:00Z",
+    "index": "products",
+    "store_id": "store_001"
+  },
+  {
+    "product_id": "1002",
+    "name": "Беспроводные наушники XYZ Buds",
+    "description": "Внутриканальные наушники с активным шумоподавлением и зарядным футляром.",
+    "price": { "amount": 3499.00, "currency": "RUB" },
+    "category": "Электроника",
+    "brand": "XYZ",
+    "stock": { "available": 300, "reserved": 15 },
+    "sku": "XYZ-BUDS-ANC",
+    "tags": ["наушники", "беспроводные", "гаджеты", "музыка"],
+    "images": [
+      { "url": "https://example.com/images/buds_front.jpg", "alt": "Наушники XYZ - вид спереди" }
+    ],
+    "specifications": { "weight": "5g", "battery_life": "30 hours", "bluetooth": "5.3" },
+    "created_at": "2023-09-15T10:00:00Z",
+    "updated_at": "2023-10-12T09:00:00Z",
+    "index": "products",
+    "store_id": "store_001"
+  },
+  {
+    "product_id": "1003",
+    "name": "Смартфон ABC Phone X",
+    "description": "Флагманский смартфон с AMOLED-экраном, тройной камерой и быстрой зарядкой.",
+    "price": { "amount": 59999.00, "currency": "RUB" },
+    "category": "Электроника",
+    "brand": "ABC",
+    "stock": { "available": 80, "reserved": 5 },
+    "sku": "ABC-PHONE-X",
+    "tags": ["смартфон", "телефон", "гаджеты", "камера"],
+    "images": [
+      { "url": "https://example.com/images/phonex_front.jpg", "alt": "Смартфон ABC - вид спереди" },
+      { "url": "https://example.com/images/phonex_back.jpg", "alt": "Смартфон ABC - вид сзади" }
+    ],
+    "specifications": { "weight": "198g", "screen": "6.7 AMOLED", "battery_life": "5000mAh" },
+    "created_at": "2023-08-20T08:00:00Z",
+    "updated_at": "2023-10-01T12:00:00Z",
+    "index": "products",
+    "store_id": "store_002"
+  },
+  {
+    "product_id": "1004",
+    "name": "Ноутбук ABC Book 14",
+    "description": "Лёгкий ультрабук для работы и учёбы с процессором последнего поколения.",
+    "price": { "amount": 74999.00, "currency": "RUB" },
+    "category": "Электроника",
+    "brand": "ABC",
+    "stock": { "available": 45, "reserved": 3 },
+    "sku": "ABC-BOOK-14",
+    "tags": ["ноутбук", "компьютер", "технологии", "работа"],
+    "images": [
+      { "url": "https://example.com/images/book14_open.jpg", "alt": "Ноутбук ABC - открытый" }
+    ],
+    "specifications": { "weight": "1.3kg", "ram": "16GB", "ssd": "512GB" },
+    "created_at": "2023-07-11T09:30:00Z",
+    "updated_at": "2023-09-30T18:00:00Z",
+    "index": "products",
+    "store_id": "store_002"
+  },
+  {
+    "product_id": "1005",
+    "name": "Мужская куртка NORTH Hiker",
+    "description": "Тёплая зимняя куртка с водоотталкивающей пропиткой и капюшоном.",
+    "price": { "amount": 5990.00, "currency": "RUB" },
+    "category": "Одежда",
+    "brand": "NORTH",
+    "stock": { "available": 120, "reserved": 10 },
+    "sku": "NORTH-HIKER-M",
+    "tags": ["куртка", "одежда", "зима", "мужское"],
+    "images": [
+      { "url": "https://example.com/images/hiker_front.jpg", "alt": "Куртка NORTH - вид спереди" }
+    ],
+    "specifications": { "weight": "900g", "material": "полиэстер", "size": "M" },
+    "created_at": "2023-10-05T11:00:00Z",
+    "updated_at": "2023-10-20T14:00:00Z",
+    "index": "products",
+    "store_id": "store_003"
+  },
+  {
+    "product_id": "1006",
+    "name": "Женское платье LUXA Evening",
+    "description": "Элегантное вечернее платье из натурального шёлка с открытой спиной.",
+    "price": { "amount": 8990.00, "currency": "RUB" },
+    "category": "Одежда",
+    "brand": "LUXA",
+    "stock": { "available": 60, "reserved": 4 },
+    "sku": "LUXA-EVENING-S",
+    "tags": ["платье", "одежда", "женское", "вечернее"],
+    "images": [
+      { "url": "https://example.com/images/luxaevening.jpg", "alt": "Платье LUXA" }
+    ],
+    "specifications": { "material": "шёлк", "size": "S" },
+    "created_at": "2023-09-01T10:00:00Z",
+    "updated_at": "2023-10-15T16:00:00Z",
+    "index": "products",
+    "store_id": "store_003"
+  },
+  {
+    "product_id": "1007",
+    "name": "Книга 'Война и мир' (Толстой)",
+    "description": "Роман-эпопея в одном томе с твердым переплётом и закладкой.",
+    "price": { "amount": 890.00, "currency": "RUB" },
+    "category": "Книги",
+    "brand": "РусЛит",
+    "stock": { "available": 500, "reserved": 0 },
+    "sku": "RUSLIT-WP-1",
+    "tags": ["книга", "классика", "роман", "чтение"],
+    "images": [
+      { "url": "https://example.com/images/warpeace.jpg", "alt": "Обложка Война и мир" }
+    ],
+    "specifications": { "pages": "1225", "cover": "твердый" },
+    "created_at": "2023-01-10T09:00:00Z",
+    "updated_at": "2023-02-10T09:00:00Z",
+    "index": "products",
+    "store_id": "store_004"
+  },
+  {
+    "product_id": "1008",
+    "name": "Книга 'Гарри Поттер и философский камень'",
+    "description": "Первая книга о юном волшебнике, иллюстрированное издание.",
+    "price": { "amount": 650.00, "currency": "RUB" },
+    "category": "Книги",
+    "brand": "РусЛит",
+    "stock": { "available": 420, "reserved": 12 },
+    "sku": "RUSLIT-HP-1",
+    "tags": ["книга", "фэнтези", "дети", "чтение"],
+    "images": [
+      { "url": "https://example.com/images/hp1.jpg", "alt": "Обложка Гарри Поттер 1" }
+    ],
+    "specifications": { "pages": "320", "cover": "мягкий" },
+    "created_at": "2023-03-15T12:00:00Z",
+    "updated_at": "2023-06-01T12:00:00Z",
+    "index": "products",
+    "store_id": "store_004"
+  },
+  {
+    "product_id": "1009",
+    "name": "Кофеварка HOME Brew Auto",
+    "description": "Автоматическая капельная кофеварка с таймером и поддержанием тепла.",
+    "price": { "amount": 3990.00, "currency": "RUB" },
+    "category": "Дом и сад",
+    "brand": "HOME",
+    "stock": { "available": 90, "reserved": 6 },
+    "sku": "HOME-BREW-A",
+    "tags": ["кофеварка", "кухня", "технологии", "кофе"],
+    "images": [
+      { "url": "https://example.com/images/brewauto.jpg", "alt": "Кофеварка HOME" }
+    ],
+    "specifications": { "volume": "1.2L", "power": "1000W" },
+    "created_at": "2023-08-01T08:00:00Z",
+    "updated_at": "2023-10-05T11:00:00Z",
+    "index": "products",
+    "store_id": "store_005"
+  },
+  {
+    "product_id": "1010",
+    "name": "Пылесос HOME Clean 2000",
+    "description": "Беспроводной пылесос с циклонным фильтром и насадкой для пола.",
+    "price": { "amount": 6990.00, "currency": "RUB" },
+    "category": "Дом и сад",
+    "brand": "HOME",
+    "stock": { "available": 75, "reserved": 8 },
+    "sku": "HOME-CLEAN-2K",
+    "tags": ["пылесос", "уборка", "технологии", "дом"],
+    "images": [
+      { "url": "https://example.com/images/clean2000.jpg", "alt": "Пылесос HOME" }
+    ],
+    "specifications": { "battery_life": "40 min", "power": "2000W" },
+    "created_at": "2023-07-20T10:00:00Z",
+    "updated_at": "2023-09-25T15:00:00Z",
+    "index": "products",
+    "store_id": "store_005"
+  },
+  {
+    "product_id": "1011",
+    "name": "Беговые кроссовки SPORT Run Lite",
+    "description": "Лёгкие кроссовки для бега с амортизирующей подошвой.",
+    "price": { "amount": 4500.00, "currency": "RUB" },
+    "category": "Спорт",
+    "brand": "SPORT",
+    "stock": { "available": 200, "reserved": 18 },
+    "sku": "SPORT-RUN-42",
+    "tags": ["кроссовки", "бег", "спорт", "обувь"],
+    "images": [
+      { "url": "https://example.com/images/runlite.jpg", "alt": "Кроссовки SPORT" }
+    ],
+    "specifications": { "size": "42", "weight": "240g" },
+    "created_at": "2023-09-05T09:00:00Z",
+    "updated_at": "2023-10-18T12:00:00Z",
+    "index": "products",
+    "store_id": "store_003"
+  },
+  {
+    "product_id": "1012",
+    "name": "Йога-мат SPORT Flex",
+    "description": "Антискользящий коврик для йоги и фитнеса из экологичного материала.",
+    "price": { "amount": 1290.00, "currency": "RUB" },
+    "category": "Спорт",
+    "brand": "SPORT",
+    "stock": { "available": 260, "reserved": 5 },
+    "sku": "SPORT-FLEX-Y",
+    "tags": ["йога", "фитнес", "спорт", "мат"],
+    "images": [
+      { "url": "https://example.com/images/flexmat.jpg", "alt": "Йога-мат SPORT" }
+    ],
+    "specifications": { "thickness": "6mm", "length": "180cm" },
+    "created_at": "2023-06-10T10:00:00Z",
+    "updated_at": "2023-08-15T10:00:00Z",
+    "index": "products",
+    "store_id": "store_003"
+  }
+]
