@@ -1,2 +1,0 @@
-C:\Practicum\kafka\ya-practicum-kafka\nifi_producer.py:42: DeprecationWarning: value_serializer does not implement kafka.serializer.Serializer
-  main()

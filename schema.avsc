@@ -1,9 +1,0 @@
-{
-  "type": "record",
-  "name": "Message",
-  "namespace": "practicum.kafka",
-  "doc": "Схема сообщения, отправляемого продюсером в топик topic-1",
-  "fields": [
-    { "name": "message", "type": "string" }
-  ]
-}
