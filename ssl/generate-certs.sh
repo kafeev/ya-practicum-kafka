@@ -104,6 +104,24 @@ for CLIENT in producer consumer admin; do
     -out "client.${CLIENT}-key.pem" 2>/dev/null
 done
 
+# 7. Генерация сертификата для analytics (User:analytics)
+echo "=== Generating analytics client certificate ==="
+keytool -keystore client.analytics.keystore.jks -alias client-analytics -validity 365 \
+    -genkey -storepass kafka123 -keypass kafka123 -dname "CN=analytics, OU=Kafka, O=Confluent, L=PaloAlto, ST=Ca, C=US" \
+    -ext SAN=DNS:analytics
+
+# Экспорт сертификата для подписи CA
+keytool -keystore client.analytics.keystore.jks -alias client-analytics -certreq -file client.analytics.csr -storepass kafka123
+
+# Подпись CA
+openssl x509 -req -CA ca-cert -CAkey ca-key -in client.analytics.csr -out client.analytics-signed.crt -days 365 -CAcreateserial -passin pass:kafka123
+
+# Импорт CA в клиентский keystore
+keytool -keystore client.analytics.keystore.jks -alias CARoot -import -file ca-cert -storepass kafka123 -noprompt
+
+# Импорт подписанного сертификата
+keytool -keystore client.analytics.keystore.jks -alias client-analytics -import -file client.analytics-signed.crt -storepass kafka123
+
 echo ""
 echo "Готово! Файлы в ${OUTPUT_DIR}:"
 ls -la

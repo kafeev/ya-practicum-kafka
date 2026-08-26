@@ -34,3 +34,26 @@ kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
 echo ""
 echo ">>> Топики:"
 kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" --list
+
+#Шаг 3.1: Создание топика для рекомендаций в РЕЗЕРВНОМ кластере
+# Аналитика (Spark) читает primary.client_requests и пишет recommendations
+# именно в резервный кластер (KAFKA_BOOTSTRAP=backup1:9195,...).
+BACKUP_BOOTSTRAP=backup1:9195
+BACKUP_ADMIN=/etc/kafka/ssl-config/admin-backup.properties
+
+echo ">>> Создание топика recommendations в резервном кластере (backup)..."
+kafka-topics --bootstrap-server "$BACKUP_BOOTSTRAP" --command-config "$BACKUP_ADMIN" \
+  --create --if-not-exists --topic recommendations \
+  --partitions 3 --replication-factor 3 \
+  --config min.insync.replicas=2 || true
+
+# Топик для сырых данных (используется Spark для landing в HDFS, опционально)
+echo ">>> Создание топика raw_data в резервном кластере (backup)..."
+kafka-topics --bootstrap-server "$BACKUP_BOOTSTRAP" --command-config "$BACKUP_ADMIN" \
+  --create --if-not-exists --topic raw_data \
+  --partitions 3 --replication-factor 3 \
+  --config min.insync.replicas=2 || true
+
+echo ""
+echo ">>> Топики резервного кластера (backup):"
+kafka-topics --bootstrap-server "$BACKUP_BOOTSTRAP" --command-config "$BACKUP_ADMIN" --list

@@ -44,3 +44,40 @@ kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
 echo ""
 echo ">>> ACL:"
 kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" --list
+
+# Шаг 3.2: ACL для аналитики (В РЕЗЕРВНОМ кластере, т.к. Spark работает с backup)
+# ===== ACL для аналитики =====
+BACKUP_BOOTSTRAP=backup1:9195
+BACKUP_ADMIN=/etc/kafka/ssl-config/admin-backup.properties
+echo ">>> Setting ACL for analytics on backup cluster..."
+
+# Аналитика читает из резервного кластера primary.client_requests
+kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+  --command-config "$BACKUP_ADMIN" \
+  --add --allow-principal User:analytics \
+  --operation DESCRIBE --operation READ --topic "primary.client_requests" \
+  --group "*"
+
+# Аналитика пишет в recommendations (в резервном кластере)
+kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+  --command-config "$BACKUP_ADMIN" \
+  --add --allow-principal User:analytics \
+  --operation DESCRIBE --operation WRITE --topic recommendations
+
+# Аналитика читает products (если нужно для обогащения)
+kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+  --command-config "$BACKUP_ADMIN" \
+  --add --allow-principal User:analytics \
+  --operation DESCRIBE --operation READ --topic "primary.products"
+
+# Консьюмер может читать рекомендации
+kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+  --command-config "$BACKUP_ADMIN" \
+  --add --allow-principal User:consumer \
+  --operation DESCRIBE --operation READ --topic recommendations
+
+echo "=== Current ACLs (backup) ==="
+kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+  --command-config "$BACKUP_ADMIN" \
+  --list
+
