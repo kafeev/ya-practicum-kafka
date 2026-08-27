@@ -97,6 +97,9 @@ def main():
 
     read_options = dict(kafka_config)
     read_options["startingOffsets"] = "earliest"
+    # Топик может быть пересоздан (docker compose down без -v не хранит топики),
+    # поэтому допускаем сброс оффсетов при расхождении чекпоинта с реальным топиком.
+    read_options["failOnDataLoss"] = "false"
 
     stream_df = (spark.readStream
                  .format("kafka")

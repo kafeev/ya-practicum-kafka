@@ -366,7 +366,7 @@ init/01_init.sh             # создание таблиц products и client_e
 shop_api/                   # SHOP API: producer.py, Dockerfile, requirements.txt
 product_sink/               # product-sink: consumer.py, Dockerfile, requirements.txt
 client_api/                 # CLIENT API: client_api.py, Dockerfile, requirements.txt
-docker-compose.yaml         # добавлены postgres, shop-api, product-sink, client-api, kafka-ui, nifi(profile)
+docker-compose.yaml         # добавлены postgres, shop-api, product-sink, client-api
 ssl/config/create-topics.sh # добавлены топики products и client_requests
 ssl/config/setup-acls.sh    # добавлены ACL для products и client_requests
 ```
@@ -389,10 +389,7 @@ docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
 # 5) Поднять PostgreSQL и сервисы платформы
 docker compose up -d postgres product-sink shop-api
 
-# 6) (опционально) UI для Kafka — http://localhost:8080
-docker compose up -d kafka-ui
-
-# 7) Запуск интерактивного терминала CLIENT API
+# 6) Запуск интерактивного терминала CLIENT API
 docker compose run -it client-api
 ```
 
@@ -421,14 +418,24 @@ docker compose logs -f product-sink   # "Сохранён товар 1001 ..."
 ```
 ![product-sink](picts/product-sink.png)
 
-#### Б. Kafka UI (визуальная проверка топиков)
+#### Б. Проверка топиков через утилиты (вместо Kafka UI, который был опционален и удалён)
 
-Откройте http://localhost:8080 → кластер `marketplace`. Должны быть топики
-`products` и `client_requests` (плюс `topic-1`, `topic-2` из демо). Можно открыть
-топик и посмотреть сообщения (в `products` — JSON товаров, в `client_requests` —
-события запросов клиентов).
-![products](picts/kafka-products-messages.png)
-![client-requests](picts/kafka-client-search-requests.png)
+Список топиков основного кластера:
+
+```bash
+docker compose exec kafka1 kafka-topics \
+  --bootstrap-server kafka1:9095 --command-config /etc/kafka/ssl-config/admin.properties \
+  --list
+# ожидаем: topic-1, topic-2, products, client_requests (+ служебные __consumer_offsets, mm2-*)
+```
+
+Прочитать сообщения из топика (аналог «просмотра в UI»):
+
+```bash
+docker compose exec kafka1 kafka-console-consumer \
+  --bootstrap-server kafka1:9095 --consumer.config /etc/kafka/ssl-config/admin.properties \
+  --topic products --from-beginning --max-messages 5 --timeout-ms 8000
+```
 
 #### В. CLIENT API: поиск и рекомендации
 
@@ -484,10 +491,7 @@ docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
 docker compose up -d postgres product-sink shop-api
 
 # остановить только сервисы платформы (кластер оставить)
-docker compose stop postgres product-sink shop-api client-api kafka-ui
-
-# NiFi (отдельный профиль, пока не настроен под платформу)
-docker compose --profile nifi up -d nifi   # https://localhost:8443
+docker compose stop postgres product-sink shop-api client-api
 ```
 
 > Пароль PostgreSQL (пользователь `marketplace`, БД `marketplace`) — `marketplace`.
@@ -555,7 +559,7 @@ docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
 docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
 
 # платформа + резервный кластер + зеркалирование + аналитика
-docker compose up -d postgres product-sink shop-api kafka-ui
+docker compose up -d postgres product-sink shop-api
 docker compose up -d backup1 backup2 backup3
 docker compose up -d mirror-maker
 docker compose up -d spark-analytics
@@ -629,6 +633,10 @@ docker compose exec backup1 kafka-console-consumer \
   повторную запись уже обработанных событий в HDFS при сбоях.
 - `startingOffsets=earliest` задаётся только для первого (холодного) старта, пока
   чекпоинта ещё нет.
+- На чтении Kafka установлен `failOnDataLoss=false`: топики не персистятся между
+  `docker compose down`/`up` и могут быть пересозданы с оффсетами сброшенными в 0,
+  что иначе привело бы к падению стрима из-за расхождения с сохранённым чекпоинтом.
+  С этим флагом Spark просто перечитывает топик с начала после пересоздания.
 
 ### 14.3 Запуск
 

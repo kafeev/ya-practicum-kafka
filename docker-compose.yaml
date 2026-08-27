@@ -302,41 +302,6 @@
       - kafka-network
     restart: on-failure
 
-  # ===== Kafka UI (опционально) =====
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
-    ports:
-      - "8080:8080"
-    environment:
-      - KAFKA_CLUSTERS_0_NAME=marketplace
-      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka1:9095,kafka2:9096,kafka3:9097
-      - KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL=SSL
-      - KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_LOCATION=/ssl/certs/kafka.truststore.jks
-      - KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_PASSWORD=kafka123
-      - KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_LOCATION=/ssl/certs/kafka1.keystore.jks
-      - KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_PASSWORD=kafka123
-      - KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEY_PASSWORD=kafka123
-      - KAFKA_CLUSTERS_0_PROPERTIES_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM=
-    volumes:
-      - ./ssl/certs:/ssl/certs:ro
-    networks:
-      - kafka-network
-
-  # NiFi (опционально, включается профилем: docker compose --profile nifi up -d nifi)
-  nifi:
-    image: apache/nifi:1.25.0
-    profiles: ["nifi"]
-    ports:
-      - "8443:8443"
-    environment:
-      - SINGLE_USER_CREDENTIALS_USERNAME=admin
-      - SINGLE_USER_CREDENTIALS_PASSWORD=admin123456789
-    volumes:
-      - ./ssl/certs:/opt/nifi/ssl:ro
-    networks:
-      - kafka-network
-
   # ---------------------------------------------------------------------------
   # Второй (резервный) Kafka-кластер для зеркалирования (Шаг 2, отказоустойчивость)
   # Переиспользуются сертификаты kafka{1..3}, поэтому hostname-проверка отключена
@@ -549,32 +514,6 @@
       - hdfs-namenode
       - hdfs-datanode
     restart: on-failure
-    networks:
-      - kafka-network
-
-  # ===== CLI для проверки (новый сервис) =====
-  check-analytics:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: check-analytics
-    depends_on:
-      - spark-analytics
-    entrypoint: >
-      /bin/bash -c "
-      echo 'Ожидаем появления сообщений в топике recommendations...';
-      sleep 40;
-      kafka-console-consumer \
-        --bootstrap-server backup1:9195 \
-        --consumer.config /etc/kafka/ssl-config/admin-backup.properties \
-        --topic recommendations \
-        --from-beginning \
-        --max-messages 10 \
-        --timeout-ms 10000 || echo 'Нет сообщений (возможно еще не накопились)';
-      echo 'Для проверки логов выполните: docker compose logs spark-analytics';
-      tail -f /dev/null
-      "
-    volumes:
-      - ./ssl/certs:/etc/kafka/secrets:ro
-      - ./ssl/config:/etc/kafka/ssl-config:ro
     networks:
       - kafka-network
 
