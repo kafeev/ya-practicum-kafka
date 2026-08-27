@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -19,9 +19,7 @@ def create_spark_session():
     """Создание Spark сессии с SSL и HDFS настройками."""
     spark = SparkSession.builder \
         .appName("AnalyticsSystem") \
-        .config("spark.sql.streaming.checkpointLocation", "/tmp/checkpoint-analytics") \
         .config("spark.hadoop.fs.defaultFS", "hdfs://hdfs-namenode:8020") \
-        .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1") \
         .getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
     return spark
@@ -66,7 +64,7 @@ def write_batch(batch_df, batch_id, kafka_config):
         lit("popular_search").alias("type"),
         col("query").alias("recommendation"),
         col("popularity"),
-        lit(datetime.now().isoformat()).alias("generated_at"),
+        lit(datetime.now(timezone.utc).isoformat()).alias("generated_at"),
     )).alias("value"))
 
     try:
@@ -113,7 +111,7 @@ def main():
     query = (stream_df.writeStream
              .foreachBatch(lambda batch_df, batch_id: write_batch(batch_df, batch_id, kafka_config))
              .outputMode("append")
-             .option("checkpointLocation", "/tmp/checkpoint-spark-analytics")
+             .option("checkpointLocation", "/opt/spark/checkpoint-spark-analytics")
              .start())
 
     print("Analytics system started. Waiting for data...")

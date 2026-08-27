@@ -13,6 +13,9 @@
 9. [Остановка и перезапуск](#шаг-6-остановка-и-перезапуск)
 10. [Запуск на другом компьютере](#шаг-7-запуск-на-другом-компьютере)
 11. [Известные особенности и решения](#11-известные-особенности-и-решения)
+12. [Аналитическая платформа маркетплейса (Шаг 1)](#12-аналитическая-платформа-маркетплейса-шаг-1)
+13. [Шаг 2: отказоустойчивость Kafka](#13-шаг-2-отказоустойчивость-kafka-репликация-mininsyncreplicas-второй-кластер)
+14. [Шаг 3: аналитика на Spark (Structured Streaming + HDFS)](#14-шаг-3-аналитика-на-spark-structured-streaming--hdfs)
 
 ---
 
@@ -118,7 +121,12 @@ docker compose up -d --build
 Три брокера должны иметь статус `Up ... (healthy)`.
 
 > **Первый запуск / после `down` без `-v`:** топики и ACL хранятся внутри
-> контейнеров брокеров и исчезают при удалении контейнеров — выполняйте шаги 3 и 4.
+> контейнеров брокеров и исчезают при удалении контейнеров — после поднятия
+> кластера обязательно выполните [Шаг 3](#шаг-3-создание-топиков) и
+> [Шаг 4](#шаг-4-настройка-acl). Если `mirror-maker` (зеркалирование, Шаг 2
+> платформы) был запущен до создания топиков, перезапустите его, иначе
+> зеркальные топики `primary.*` не появятся:
+> `docker compose restart mirror-maker`.
 
 ---
 
@@ -130,7 +138,10 @@ docker compose up -d --build
 docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
 ```
 
-Скрипт создаёт `topic-1` и `topic-2` (3 партиции, RF=3) и выводит их список.
+Скрипт создаёт в основном кластере топики `topic-1`, `topic-2`, `products`,
+`client_requests` (по 3 партиции, RF=3, `min.insync.replicas=2`), а в резервном
+кластере — `recommendations` и `raw_data`. После выполнения выводятся списки
+топиков обоих кластеров.
 
 ---
 
@@ -144,6 +155,12 @@ docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
 ```
 
 Скрипт выставляет ACL по схеме из [раздела 1](#1-архитектура) и выводит их список.
+
+Помимо демо-топиков, скрипт также настраивает права платформы маркетплейса:
+`User:producer` пишет в `products`/`client_requests`, `User:consumer` читает
+`products`, а для аналитики `User:analytics` получает `READ`/`DESCRIBE` на
+`primary.client_requests` и `primary.products` и `WRITE`/`DESCRIBE` на
+`recommendations` в резервном кластере (см. [Шаг 3, раздел 14](#14-шаг-3-аналитика-на-spark-structured-streaming--hdfs)).
 
 > Оба скрипта монтируются в брокеры из `ssl/config` (каталог `/etc/kafka/ssl-config`).
 
@@ -537,11 +554,18 @@ docker compose up -d kafka1 kafka2 kafka3
 docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
 docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
 
-# платформа + резервный кластер + зеркалирование
+# платформа + резервный кластер + зеркалирование + аналитика
 docker compose up -d postgres product-sink shop-api kafka-ui
 docker compose up -d backup1 backup2 backup3
 docker compose up -d mirror-maker
+docker compose up -d spark-analytics
 ```
+
+> Если все сервисы поднимаются одной командой (`docker compose up -d --build`),
+> `mirror-maker` может стартовать до создания топиков на шаге 3 и не создать
+> зеркальные топики `primary.*`. В этом случае перезапустите его после шага 3:
+> `docker compose restart mirror-maker`. Аналитика (`spark-analytics`) ждёт
+> появления `primary.client_requests` и сама возобновит работу после рестарта.
 
 ### 13.6 Проверка зеркалирования
 
@@ -569,3 +593,81 @@ docker compose exec backup1 kafka-console-consumer \
 > `backup1:9195/backup2:9196/backup3:9197` (топики там доступны под именами
 > `primary.*`). Для автоматического переключения продюсеры/консьюмеры должны
 > указывать оба кластера в `bootstrap.servers`.
+
+---
+
+## 14. Шаг 3: аналитика на Spark (Structured Streaming + HDFS)
+
+Поверх данных, зеркалированных в резервный кластер (`primary.client_requests`),
+работает Spark-приложение `spark-analytics`, реализующее базовую аналитику
+маркетплейса в реальном времени.
+
+### 14.1 Что делает сервис
+
+- читает события запросов клиентов из топика `primary.client_requests` резервного
+  кластера (`backup1:9195`, SSL + принципал `User:analytics`);
+- в каждом микро-батче сохраняет «сырые» события в HDFS
+  (`hdfs://hdfs-namenode:8020/user/spark/raw`, формат JSON, режим `append`);
+- вычисляет ТОП-10 популярных поисковых запросов (`type=search`) за батч и
+  публикует их в топик `recommendations` резервного кластера (событие
+  `popular_search` с полем `generated_at` в UTC).
+
+Код приложения — `spark-analytics/analytics.py`, образ собирается из
+`spark-analytics/Dockerfile` (базовый `spark:3.5.1`). Все нужные jar-файлы
+(`spark-sql-kafka`, `kafka-clients`, клиент Hadoop и зависимости) предзагружаются
+в образ на этапе сборки, поэтому в рантайме `--packages` не требуется и приложение
+стартует в офлайн-среде. `requirements.txt` намеренно пуст (pyspark уже в базовом
+образе, отдельный `py4j`/kafka-python не нужны и могут сломать импорт).
+
+### 14.2 Конфигурация и чекпоинты
+
+- Точка выхода стрима (`checkpointLocation`) — `/opt/spark/checkpoint-spark-analytics`
+  внутри контейнера, **смонтирована в именованный volume
+  `spark-analytics-checkpoint`** в `docker-compose.yaml`. Благодаря персистентному
+  чекпоинту при перезапуске контейнера (`restart: on-failure`) стрим возобновляется
+  с последнего сохранённого смещения, а не с `earliest`. Это предотвращает
+  повторную запись уже обработанных событий в HDFS при сбоях.
+- `startingOffsets=earliest` задаётся только для первого (холодного) старта, пока
+  чекпоинта ещё нет.
+
+### 14.3 Запуск
+
+Сервис `spark-analytics` поднимается вместе со всем стендом
+(`docker compose up -d --build`) либо отдельно:
+
+```bash
+docker compose up -d spark-analytics
+```
+
+Перед запуском должны быть выполнены [Шаг 3](#шаг-3-создание-топиков) и
+[Шаг 4](#шаг-4-настройка-acl), а топик `primary.client_requests` — существовать
+в резервном кластере (его создаёт MirrorMaker 2, см. раздел 13). Сам сервис
+стартует и ждёт появления топика, поэтому порядок запуска некритичен.
+
+### 14.4 Проверка
+
+Логи обработки микро-батчей:
+
+```bash
+docker compose logs -f spark-analytics
+# [batch N] raw data landed to HDFS (hdfs://hdfs-namenode:8020/user/spark/raw)
+# [batch N] recommendations written to topic 'recommendations'
+```
+
+Прочитать рекомендации из резервного кластера:
+
+```bash
+docker compose exec backup1 kafka-console-consumer \
+  --bootstrap-server localhost:9195 --consumer.config /etc/kafka/ssl-config/admin-backup.properties \
+  --topic recommendations --from-beginning --max-messages 10 --timeout-ms 8000
+```
+
+Убедиться, что «сырые» данные попали в HDFS:
+
+```bash
+docker compose exec hdfs-namenode hdfs dfs -ls /user/spark/raw
+```
+
+Минимальная проверка сквозного пути — отправить поисковые запросы через
+CLIENT API (раздел 12.3, шаг 7 / 12.4.В); через несколько секунд Spark выдаст
+соответствующие рекомендации в топик `recommendations`.

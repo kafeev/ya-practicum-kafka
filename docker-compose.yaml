@@ -541,6 +541,7 @@
       - ./spark-analytics:/opt/spark-apps:ro
       - ./ssl/certs:/opt/bitnami/spark/ssl/certs:ro
       - ./data:/opt/bitnami/spark/data:ro
+      - spark-analytics-checkpoint:/opt/spark/checkpoint-spark-analytics
     depends_on:
       - backup1
       - backup2
@@ -583,3 +584,4 @@ networks:
 
 volumes:
   postgres_data:
+  spark-analytics-checkpoint:
