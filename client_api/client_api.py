@@ -66,18 +66,39 @@ def send_request_event(producer, event):
 
 def cmd_search(conn, producer, user_id, query):
     cur = conn.cursor()
-    like = f"%{query}%"
-    cur.execute(
-        """
-        SELECT product_id, name, brand, category, price_amount, price_currency, stock_available
-        FROM products
-        WHERE name ILIKE %s OR description ILIKE %s OR tags::text ILIKE %s
-        ORDER BY name
-        LIMIT 20
-        """,
-        (like, like, like),
-    )
-    rows = cur.fetchall()
+    # Шаг 5 (расширенный вариант): полнотекстовый поиск по индексу search_vector
+    # с ранжированием релевантности (ts_rank). При неудаче/пустом результате —
+    # запасной подстроковый поиск (ILIKE) для частичных слов.
+    rows = []
+    try:
+        cur.execute(
+            """
+            SELECT product_id, name, brand, category, price_amount, price_currency, stock_available
+            FROM products, websearch_to_tsquery('russian', %s) q
+            WHERE search_vector @@ q
+            ORDER BY ts_rank(search_vector, q) DESC
+            LIMIT 20
+            """,
+            (query,),
+        )
+        rows = cur.fetchall()
+    except Exception as e:
+        logger.warning("Полнотекстовый поиск не удался (%s), откат к ILIKE", e)
+
+    if not rows:
+        like = f"%{query}%"
+        cur.execute(
+            """
+            SELECT product_id, name, brand, category, price_amount, price_currency, stock_available
+            FROM products
+            WHERE name ILIKE %s OR description ILIKE %s OR tags::text ILIKE %s
+            ORDER BY name
+            LIMIT 20
+            """,
+            (like, like, like),
+        )
+        rows = cur.fetchall()
+
     ids = [r[0] for r in rows]
 
     cur.execute(

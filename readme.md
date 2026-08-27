@@ -17,6 +17,7 @@
 13. [Шаг 2: отказоустойчивость Kafka](#13-шаг-2-отказоустойчивость-kafka-репликация-mininsyncreplicas-второй-кластер)
 14. [Шаг 3: аналитика на Spark (Structured Streaming + HDFS)](#14-шаг-3-аналитика-на-spark-structured-streaming--hdfs)
 15. [Шаг 4: потоковая фильтрация запрещённых товаров (Faust)](#15-шаг-4-потоковая-фильтрация-запрещённых-товаров-faust)
+16. [Шаг 5: хранение и поиск данных (расширенный вариант, PostgreSQL)](#16-шаг-5-хранение-и-поиск-данных-расширенный-вариант-postgresql)
 
 ---
 
@@ -807,3 +808,103 @@ docker compose run --rm forbidden-filter python cli.py list
 
 > Примечание: `product-sink` теперь читает `products-allowed` (а не `products`),
 > поэтому запрещённые товары физически не доходят до БД.
+
+## 16. Шаг 5: хранение и поиск данных (расширенный вариант, PostgreSQL)
+
+### 16.1 Что реализовано
+
+Выбран **расширенный вариант** — хранение и поиск на существующем инстансе
+PostgreSQL (без Kafka Connect и без отдельного хранилища):
+
+- **Хранение.** Отфильтрованные товары попадают в PostgreSQL: сервис
+  `product-sink` читает топик `products-allowed` (результат фильтрации Faust,
+  см. раздел 15) и выполняет upsert в таблицу `products`. Таким образом в БД —
+  только разрешённые товары; запрещённые (топик `products-rejected`) в БД не
+  попадают. Это удовлетворяет требованию «в хранилище попадают только
+  отфильтрованные данные».
+- **Поиск.** Полнотекстовый поиск на стороне PostgreSQL: колонка
+  `search_vector` (тип `tsvector`) + GIN-индекс + триггер, который
+  пересчитывает вектор при каждой записи. Поиск ранжируется по релевантности
+  (`ts_rank`). Клиентский поиск выполняется командой `search` в `client-api`.
+
+> Базовый вариант (запись отфильтрованных данных в файл через Kafka Connect)
+> здесь не используется, так как выбран расширенный вариант на PostgreSQL.
+
+### 16.2 Схема поиска
+
+Создаётся скриптом инициализации `init/01_init.sh` (идемпотентно, применяется
+при первом подъёме БД) и может быть применена к уже работающей БД отдельной
+миграцией:
+
+```sql
+ALTER TABLE products ADD COLUMN IF NOT EXISTS search_vector tsvector;
+CREATE INDEX IF NOT EXISTS idx_products_search ON products USING gin (search_vector);
+
+CREATE OR REPLACE FUNCTION products_search_vector_update() RETURNS trigger AS $$
+BEGIN
+  NEW.search_vector :=
+      setweight(to_tsvector('russian', coalesce(NEW.name, '')), 'A') ||
+      setweight(to_tsvector('russian', coalesce(NEW.brand, '')), 'A') ||
+      setweight(to_tsvector('russian', coalesce(NEW.category, '')), 'B') ||
+      setweight(to_tsvector('russian', coalesce(NEW.description, '')), 'C') ||
+      setweight(to_tsvector('russian', coalesce(NEW.tags::text, '')), 'C');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_products_search_vector ON products;
+CREATE TRIGGER trg_products_search_vector
+  BEFORE INSERT OR UPDATE ON products
+  FOR EACH ROW EXECUTE FUNCTION products_search_vector_update();
+```
+
+Веса: имя/бренд — `A`, категория — `B`, описание/теги — `C`. Конфигурация
+полнотекстового поиска — `'russian'` (снежинка-стеммер для русского; латинские
+бренды индексируются как есть).
+
+### 16.3 Поиск из client-api
+
+Команда `search <user_id> <запрос>` в `client_api` выполняет:
+
+```sql
+SELECT product_id, name, brand, category, price_amount, price_currency, stock_available
+FROM products, websearch_to_tsquery('russian', %s) q
+WHERE search_vector @@ q
+ORDER BY ts_rank(search_vector, q) DESC
+LIMIT 20;
+```
+
+При пустом результате или ошибке парсинга запроса выполняется запасной
+подстроковый поиск (`ILIKE` по имени/описанию/тегам) — для частичных слов и
+нестандартных запросов. Каждый поиск логируется в `client_events` и в топик
+`client_requests` (для аналитики Spark, раздел 14).
+
+### 16.4 Проверка
+
+На уровне SQL (топик `products-allowed` уже наполнен product-sink):
+
+```bash
+docker exec -i marketplace-postgres psql -U marketplace -d marketplace -c \
+  "SELECT product_id, name FROM products, websearch_to_tsquery('russian','часы') q \
+   WHERE search_vector @@ q ORDER BY ts_rank(search_vector,q) DESC LIMIT 3;"
+# 1001 | Умные часы XYZ Watch Pro
+```
+
+Через клиентский интерфейс:
+
+```bash
+docker compose run --rm client-api
+# search user_1 часы
+#   Найдено товаров: 1
+#     [1001] Умные часы XYZ Watch Pro | XYZ | Электроника | 4999.99 RUB | на складе: 150
+# search user_1 NORTH      -> 1005 (Мужская куртка NORTH Hiker)
+# search user_1 куртка     -> 1005
+```
+
+Убедиться, что в БД — только отфильтрованные товары (нет запрещённых, если
+список запрещённых не пуст):
+
+```bash
+docker exec -i marketplace-postgres psql -U marketplace -d marketplace -tAc \
+  "SELECT count(*) FROM products;"
+```
