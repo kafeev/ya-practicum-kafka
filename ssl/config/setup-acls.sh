@@ -30,10 +30,43 @@ echo ""
 echo ">>> products: продюсер пишет, консьюмер (product-sink) читает"
 kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
   --add --allow-principal User:producer \
-  --operation Write --operation Describe --topic products
+  --operation Read --operation Write --operation Describe --topic products
 kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
   --add --allow-principal User:consumer \
   --operation Read --operation Describe --topic products
+
+echo ">>> forbidden-filter (Faust): продюсер читает/пишет служебные топики фильтрации"
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:producer \
+  --operation Read --operation Write --operation Describe --topic forbidden-products
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:producer \
+  --operation Write --operation Describe --topic products-allowed
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:producer \
+  --operation Write --operation Describe --topic products-rejected
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:consumer \
+  --operation Read --operation Describe --topic products-allowed
+
+echo ">>> forbidden-filter: внутренние топики Faust (assignor/reply) по префиксу forbidden-filter-"
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:producer \
+  --operation All --topic forbidden-filter- --resource-pattern-type prefixed
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:producer \
+  --operation Create --cluster
+
+echo ">>> forbidden-filter: доступ к группе консьюмера (FindCoordinator требует Describe на группу)"
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:producer \
+  --operation Read --operation Describe --group forbidden-filter
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:producer \
+  --operation Read --operation Describe --group 'forbidden-filter-*'
+kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --add --allow-principal User:producer \
+  --operation Read --operation Describe --group forbidden-cli-list
 
 echo ""
 echo ">>> client_requests: продюсер (CLIENT API) пишет события запросов"

@@ -16,6 +16,7 @@
 12. [Аналитическая платформа маркетплейса (Шаг 1)](#12-аналитическая-платформа-маркетплейса-шаг-1)
 13. [Шаг 2: отказоустойчивость Kafka](#13-шаг-2-отказоустойчивость-kafka-репликация-mininsyncreplicas-второй-кластер)
 14. [Шаг 3: аналитика на Spark (Structured Streaming + HDFS)](#14-шаг-3-аналитика-на-spark-structured-streaming--hdfs)
+15. [Шаг 4: потоковая фильтрация запрещённых товаров (Faust)](#15-шаг-4-потоковая-фильтрация-запрещённых-товаров-faust)
 
 ---
 
@@ -344,8 +345,10 @@ docker compose logs -f consumer
 
 - **SHOP API** — эмуляция магазина: читает файл `data/products.json` и отправляет
   каждый товар в топик `products` (принципал `User:producer`).
-- **product-sink** — консьюмер: читает `products` и сохраняет/обновляет записи
-  в таблице `products` PostgreSQL (принципал `User:consumer`).
+- **product-sink** — консьюмер: читает `products-allowed` (топик, в который
+  попадают только разрешённые товары после фильтрации в `forbidden-filter`,
+  см. раздел 15) и сохраняет/обновляет записи в таблице `products` PostgreSQL
+  (принципал `User:consumer`).
 - **CLIENT API** — терминал клиента:
   - `search <user_id> <запрос>` — ищет товары в PostgreSQL (по имени, описанию,
     тегам) и логирует событие в Kafka `client_requests` и в таблицу `client_events`;
@@ -679,3 +682,128 @@ docker compose exec hdfs-namenode hdfs dfs -ls /user/spark/raw
 Минимальная проверка сквозного пути — отправить поисковые запросы через
 CLIENT API (раздел 12.3, шаг 7 / 12.4.В); через несколько секунд Spark выдаст
 соответствующие рекомендации в топик `recommendations`.
+
+## 15. Шаг 4: потоковая фильтрация запрещённых товаров (Faust)
+
+### 15.1 Что делает сервис
+
+`forbidden-filter` — это сервис потоковой обработки на **Faust** (Python-аналог
+Kafka Streams). Он реализует требование «извлечь товары из топика и
+отфильтровать запрещённые»:
+
+- читает товары из топика `products` (основной кластер);
+- сверяет `product_id` каждого товара со **списком запрещённых**;
+- разрешённые товары (`product_id` нет в списке) отправляет в `products-allowed`;
+- запрещённые товары отправляет в `products-rejected` (топик видимости/логов);
+- `product-sink` читает теперь **`products-allowed`** (см. раздел 12) и кладёт
+  разрешённые товары в PostgreSQL. Запрещённые товары в БД не попадают.
+
+Источник истины для списка запрещённых — компактный топик `forbidden-products`.
+Сервис держит словарь запрещённых в памяти, проигрывая `forbidden-products` с
+начала (`auto_offset_reset=earliest`) при старте; добавление/удаление товара из
+списка публикуется туда же через CLI (см. 15.4), поэтому список актуален без
+перезапуска сервиса.
+
+> Почему Faust: из трёх вариантов (Kafka Streams / Faust / Goka) только Faust —
+> экосистема Python, совместимая с остальным кодом стенда.
+
+### 15.2 Топики и ACL
+
+Новые топики (создаются в `ssl/config/create-topics.sh`):
+
+| Топик | Назначение | Параметры |
+|-------|-----------|-----------|
+| `forbidden-products` | список запрещённых (compacted) | RF=3, `cleanup.policy=compact` |
+| `products-allowed` | разрешённые товары → `product-sink` | RF=3 |
+| `products-rejected` | отклонённые товары (лог/видимость) | RF=3 |
+
+Права (добавлены в `ssl/config/setup-acls.sh`, применяются `setup-acls.sh`):
+
+- `User:producer` (с этим же принципалом работает Faust, т.к. он пишет и
+  читает служебные топики): `READ/WRITE/DESCRIBE` на `products`,
+  `forbidden-products`, `products-allowed`, `products-rejected`; `ALL` на
+  префикс `forbidden-filter-` (внутренние топики Faust: assignor/reply);
+  `Create` и `Describe` на **CLUSTER** (нужны, чтобы Faust мог создавать
+  внутренние топики и выполнять `FindCoordinator` для группы консьюмера);
+- `User:producer` также выданы `READ/DESCRIBE` на группы `forbidden-filter`,
+  `forbidden-filter-*` и `forbidden-cli-list` (без права на группу
+  `FindCoordinator` падает с `GROUP_AUTHORIZATION_FAILED`, error 30);
+- `User:consumer` (`product-sink`): `READ/DESCRIBE` на `products-allowed`.
+
+### 15.3 Конфигурация
+
+Сервис описан в `docker-compose.yaml` (образ собирается из `./forbidden_filter`).
+Ключевые переменные окружения:
+
+| Переменная | Значение по умолчанию | Назначение |
+|-----------|----------------------|-----------|
+| `BOOTSTRAP_SERVERS` | `kafka1:9095,kafka2:9096,kafka3:9097` | брокеры основного кластера |
+| `SSL_CAFILE` / `SSL_CERTFILE` / `SSL_KEYFILE` | клиентские сертификаты `client.producer` | TLS для продюсера/консьюмера |
+| `SSL_CHECK_HOSTNAME` | `false` | отключение проверки имени хоста |
+| `PRODUCTS_TOPIC` / `FORBIDDEN_TOPIC` / `ALLOWED_TOPIC` / `REJECTED_TOPIC` | `products` / `forbidden-products` / `products-allowed` / `products-rejected` | имена топиков |
+
+Важные детали реализации (`forbidden_filter/faust_app.py`):
+
+- `broker` передаётся **списком** URL (`[kafka://kafka1:9095, ...]`). Если
+  передать строку с несколькими хостами, внутренний клиент aiokafka откатывается
+  на `127.0.0.1:9092` и не читает данные;
+- `broker_credentials=SSLCredentials(ssl_context)` включает TLS для продюсера и
+  консьюмера;
+- `failOnDataLoss` не применим (Faust сам ведёт оффсеты), но чекпоинтов нет —
+  состояние списка восстанавливается реплейем `forbidden-products` с начала.
+
+### 15.4 Запуск и управление списком запрещённых
+
+Сервис поднимается вместе со стендом (`docker compose up -d --build`) либо
+отдельно:
+
+```bash
+docker compose up -d forbidden-filter
+```
+
+Управление списком запрещённых — через CLI (`forbidden_filter/cli.py`,
+использует те же `client.producer`-сертификаты, пишет в `forbidden-products`):
+
+```bash
+# добавить товар в запрещённые
+docker compose run --rm forbidden-filter python cli.py add 1005 \
+  --name "Мужская куртка NORTH Hiker" --reason "запрещён к продаже"
+
+# удалить из запрещённых (tombstone в компактном топике)
+docker compose run --rm forbidden-filter python cli.py remove 1005
+
+# показать текущий список (читает forbidden-products с начала)
+docker compose run --rm forbidden-filter python cli.py list
+```
+
+### 15.5 Проверка
+
+1. Добавить товар в запрещённые: `cli.py add 1005 ...`.
+2. Дождаться следующего цикла SHOP API (раз в ~60 c) и проверить логи фильтра:
+
+   ```bash
+   docker compose logs -f forbidden-filter
+   # ОТКЛОНЁН товар 1005 (...) — в списке запрещённых
+   # ПРОПУЩЕН товар 1001 (...)
+   ```
+
+3. Запрещённый товар попадает в `products-rejected`, но НЕ в `products-allowed`:
+
+   ```bash
+   docker compose exec kafka1 kafka-console-consumer \
+     --bootstrap-server kafka1:9095 --consumer.config /etc/kafka/ssl-config/admin.properties \
+     --topic products-rejected --from-beginning --max-messages 5 --timeout-ms 8000
+   # product_id=1005 присутствует
+
+   docker compose exec kafka1 kafka-console-consumer \
+     --bootstrap-server kafka1:9095 --consumer.config /etc/kafka/ssl-config/admin.properties \
+     --topic products-allowed --from-beginning --max-messages 60 --timeout-ms 8000 | grep -c 1005
+   # 0 — 1005 отфильтрован
+   ```
+
+4. Удалить из запрещённых: `cli.py remove 1005` → в следующем цикле товар
+   снова появится в `products-allowed` и в PostgreSQL (`marketplace.postgres`,
+   таблица `products`).
+
+> Примечание: `product-sink` теперь читает `products-allowed` (а не `products`),
+> поэтому запрещённые товары физически не доходят до БД.

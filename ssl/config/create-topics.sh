@@ -31,6 +31,14 @@ kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
 kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
   --create --if-not-exists --topic client_requests --partitions "$PARTITIONS" --replication-factor "$REPLICATION" --config min.insync.replicas=2
 
+# Топики фильтрации запрещённых товаров (Шаг 4, Faust)
+kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --create --if-not-exists --topic forbidden-products --partitions "$PARTITIONS" --replication-factor "$REPLICATION" --config min.insync.replicas=2 --config cleanup.policy=compact
+kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --create --if-not-exists --topic products-allowed --partitions "$PARTITIONS" --replication-factor "$REPLICATION" --config min.insync.replicas=2
+kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" \
+  --create --if-not-exists --topic products-rejected --partitions "$PARTITIONS" --replication-factor "$REPLICATION" --config min.insync.replicas=2
+
 echo ""
 echo ">>> Топики:"
 kafka-topics --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" --list

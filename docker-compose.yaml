@@ -254,7 +254,7 @@
     environment:
       - PYTHONUNBUFFERED=1
       - BOOTSTRAP_SERVERS=kafka1:9095,kafka2:9096,kafka3:9097
-      - TOPIC=products
+      - TOPIC=products-allowed
       - GROUP_ID=product-sink-group
       - SECURITY_PROTOCOL=SSL
       - SSL_CAFILE=/etc/kafka/secrets/ca-cert
@@ -266,6 +266,32 @@
       - POSTGRES_DB=marketplace
       - POSTGRES_USER=marketplace
       - POSTGRES_PASSWORD=marketplace
+    networks:
+      - kafka-network
+    restart: on-failure
+
+  # ===== forbidden-filter: потоковая фильтрация запрещённых товаров (Faust, Шаг 4) =====
+  forbidden-filter:
+    build:
+      context: ./forbidden_filter
+      dockerfile: Dockerfile
+    depends_on:
+      kafka1:
+        condition: service_healthy
+    volumes:
+      - ./ssl/certs:/etc/kafka/secrets:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BOOTSTRAP_SERVERS=kafka1:9095,kafka2:9096,kafka3:9097
+      - SSL_CAFILE=/etc/kafka/secrets/ca-cert
+      - SSL_CERTFILE=/etc/kafka/secrets/client.producer-cert.pem
+      - SSL_KEYFILE=/etc/kafka/secrets/client.producer-key.pem
+      - SSL_CHECK_HOSTNAME=false
+      - PRODUCTS_TOPIC=products
+      - FORBIDDEN_TOPIC=forbidden-products
+      - ALLOWED_TOPIC=products-allowed
+      - REJECTED_TOPIC=products-rejected
+    command: ["faust", "-A", "faust_app", "worker", "--loglevel=info"]
     networks:
       - kafka-network
     restart: on-failure
