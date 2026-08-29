@@ -19,7 +19,153 @@
 15. [Шаг 4: потоковая фильтрация запрещённых товаров (Faust)](#15-шаг-4-потоковая-фильтрация-запрещённых-товаров-faust)
  16. [Шаг 5: хранение и поиск данных (расширенный вариант, PostgreSQL)](#16-шаг-5-хранение-и-поиск-данных-расширенный-вариант-postgresql)
  17. [Шаг 6: мониторинг Kafka (Prometheus, JMX Exporter, Grafana, Alertmanager)](#17-шаг-6-мониторинг-kafka-prometheus-jmx-exporter-grafana-alertmanager)
+ 18. [Документация проекта (старт, инструменты, реализация)](#18-документация-проекта)
 
+
+---
+
+## 18. Документация проекта
+
+Этот раздел суммирует всё, что нужно для запуска, понимания использованных
+инструментов и общей архитектуры реализации. Подробные пошаговые инструкции —
+в разделах 1–17 выше.
+
+### 18.1 Инструкция по запуску
+
+Минимальный запуск всего стенда одной командой (кластер Kafka, платформа
+маркетплейса, резервный кластер, зеркалирование, Spark, HDFS, мониторинг):
+
+```bash
+# 1) собрать и поднять все сервисы
+docker compose up -d --build
+
+# 2) создать топики в основном кластере
+docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
+
+# 3) настроить ACL (права доступа)
+docker compose exec kafka1 bash /etc/kafka/ssl-config/setup-acls.sh
+
+# 4) проверить, что брокеры здоровы
+docker compose ps
+```
+
+> Если все сервисы поднялись одной командой, `mirror-maker` может стартовать до
+> создания топиков и не создать зеркальные `primary.*`. В этом случае:
+> `docker compose restart mirror-maker`. Spark (`spark-analytics`) сам возобновит
+> работу после появления `primary.client_requests`.
+
+Остановка и полный сброс:
+
+```bash
+docker compose down        # остановить (топики/ACL не персистятся)
+docker compose down -v     # полностью удалить вместе с данными
+```
+
+Интерактивные проверки:
+
+```bash
+docker compose logs -f producer          # продюсер пишет в topic-1
+docker compose logs -f consumer          # консьюмер читает topic-1
+docker compose run -it client-api        # терминал поиска/рекомендаций
+
+# добавить товар в список запрещённых (Faust)
+docker compose run --rm forbidden-filter python cli.py add 1005 \
+  --name "Мужская куртка NORTH Hiker" --reason "запрещён к продаже"
+```
+
+Доступы к UI мониторинга:
+
+| Сервис | URL | Логин/пароль |
+|---|---|---|
+| Prometheus | http://localhost:9090 | — |
+| Alertmanager | http://localhost:9093 | — |
+| Grafana | http://localhost:3000 | admin / admin |
+| HDFS UI | http://localhost:9870 | — |
+
+Требования: Docker + Docker Compose; для повторной генерации сертификатов —
+`openssl` и `keytool` (JDK). Сертификаты уже лежат в `ssl/certs/` и входят в
+репозиторий, поэтому на чистой машине генерировать их не нужно.
+
+### 18.2 Используемые инструменты
+
+| Инструмент | Назначение |
+|---|---|
+| **Docker / Docker Compose** | оркестрация всех сервисов в изолированной сети |
+| **Apache Kafka 7.5.0 (Confluent)** | 3 брокера KRaft (без ZooKeeper) — ядро стенда |
+| **SSL/TLS (`openssl`, `keytool`)** | шифрование трафика и взаимная аутентификация (mTLS) |
+| **ACL (`StandardAuthorizer`)** | авторизация доступа к топикам и группам |
+| **kafka-python** | Python-продюсер/консьюмер (`producer`, `consumer`, `shop-api`, `product-sink`, `client-api`) |
+| **Faust** | потоковая фильтрация запрещённых товаров (аналог Kafka Streams на Python) |
+| **PostgreSQL 16** | хранилище товаров и событий клиентов, полнотекстовый поиск (`tsvector`/GIN) |
+| **MirrorMaker 2** | зеркалирование топиков в резервный кластер (отказоустойчивость) |
+| **Apache Spark 3.5.1 (Structured Streaming)** | потоковая аналитика поверх Kafka → HDFS/рекомендации |
+| **Apache Hadoop HDFS 3.3.6** | хранение «сырых» событий аналитики |
+| **Prometheus + JMX Exporter** | сбор метрик брокеров (JMX-агент на порту 7071) |
+| **Alertmanager** | маршрутизация алертов (брокер упал, недорепликация, офлайн-партиции) |
+| **Grafana** | дашборды «Kafka Overview» |
+| **Python: psycopg2 / aiokafka** | драйвер PostgreSQL и асинхронный клиент Kafka для Faust |
+
+### 18.3 Реализация (общая схема)
+
+Проект построен как серия шести шагов поверх защищённого кластера Kafka:
+
+1. **Защищённый кластер (SSL + ACL).** 3 брокера KRaft с SSL-листенером
+   (`9095/9096/9097`) и взаимной аутентификацией; контроллерный кворум — на
+   PLAINTEXT `9093`. Доступ регулируется ACL (`allow.everyone.if.no.acl.found=false`),
+   принципалы берутся из CN сертификатов (`User:producer`, `User:consumer`, …).
+
+2. **Отказоустойчивость.** Все топики `RF=3`, `min.insync.replicas=2`. Резервный
+   кластер `backup1/2/3` + MirrorMaker 2 дублируют `products`/`client_requests`
+   в топики с префиксом `primary.*` — основа для failover.
+
+3. **Аналитика на Spark.** `spark-analytics` читает `primary.client_requests`,
+   сохраняет сырые события в HDFS (JSON, append) и публикует ТОП-10 поисковых
+   запросов в топик `recommendations`. Чекпоинт вынесен в volume, поэтому стрим
+   возобновляется после перезапуска без дублей.
+
+4. **Фильтрация запрещённых товаров (Faust).** Сервис читает `products`,
+   сверяет `product_id` со списком запрещённых (компактный топик
+   `forbidden-products`) и раскладывает на `products-allowed` / `products-rejected`.
+   Список управляется через CLI без перезапуска сервиса.
+
+5. **Хранение и поиск (PostgreSQL).** `product-sink` пишет в БД только
+   разрешённые товары (`products-allowed`). Полнотекстовый поиск — `tsvector`
+   + GIN-индекс + триггер, ранжирование по `ts_rank`; поиск вызывается из
+   CLIENT API и логируется в `client_events`/Kafka.
+
+6. **Мониторинг.** JMX Exporter как `-javaagent` в JVM каждого брокера отдаёт
+   метрики в Prometheus; Alertmanager шлёт алерты локальному webhook-приёмнику;
+   Grafana визуализирует состояние кластера.
+
+Сквозной поток данных:
+
+```
+SHOP API ──products──▶ [forbidden-filter] ──products-allowed──▶ product-sink ──▶ PostgreSQL
+                            │                                           ▲
+                          products-rejected                       CLIENT API (search/recommend)
+                                                                          │
+CLIENT API ──client_requests──▶ Kafka ──MM2──▶ backup(primary.*) ──▶ Spark ──▶ HDFS / recommendations
+```
+
+### 18.4 Структура проекта (полная)
+
+```
+.
+├── docker-compose.yaml          # весь стенд: 6 брокеров, сервисы, мониторинг
+├── producer/  consumer/         # демо продюсер/консьюмер (topic-1), kafka-python
+├── shop_api/                    # SHOP API: шлёт товары в products
+├── product_sink/                # консьюмер products-allowed → PostgreSQL
+├── client_api/                  # терминал поиска/рекомендаций
+├── forbidden_filter/            # Faust-фильтр запрещённых товаров + cli.py
+├── spark-analytics/             # Spark Structured Streaming (analytics.py)
+├── ssl/                         # generate-certs.sh, certs/, config/ (topics/ACL/проперти)
+├── mm2/                         # mm2.properties (MirrorMaker 2)
+├── init/                        # 01_init.sh — схема БД + полнотекстовый поиск
+├── hadoop/ hdfs/                # конфиги и тома HDFS
+├── kafka-jmx/                   # Dockerfile + конфиг JMX Exporter
+├── monitoring/                  # prometheus, alertmanager, grafana, alert-webhook
+└── data/products.json           # тестовые товары
+```
 
 ---
 
@@ -330,20 +476,40 @@ docker compose logs -f consumer
 
 ### 12.1 Архитектура Шага 1
 
-```
- SHOP API (producer.py)                  CLIENT API (client_api.py)
- читает data/products.json                интерактивный терминал
-        |                                       |  |
-        | send(JSON)                            |  | search/recommend
-        v                                       |  v
-   Kafka: products                         Kafka: client_requests   PostgreSQL
-        |                                       |        (события       (marketplace)
-        v                                       |         запросов)
- product-sink (consumer.py)                     |              ^
-        |  upsert                              |              | read products
-        v                                       |              | write client_events
-   PostgreSQL: products  <----------------------+--------------'
-        (таблица products)        поиск/рекомендации читают из БД
+```plantuml
+@startuml
+skinparam componentStyle rectangle
+skinparam monochrome false
+left to right direction
+
+actor "Магазин" as Shop
+actor "Клиент" as Client
+
+package "Kafka (SSL + ACL)" {
+  [topic: products] as TProducts
+  [topic: client_requests] as TRequests
+}
+
+package "PostgreSQL (marketplace)" {
+  database "products" as DBProducts
+  database "client_events" as DBEvents
+}
+
+[SHOP API\n(producer.py)] as ShopApi
+[product-sink\n(consumer.py)] as Sink
+[CLIENT API\n(client_api.py)] as ClientApi
+
+Shop --> ShopApi : читает data/products.json
+ShopApi --> TProducts : send(JSON)\nUser:producer
+TProducts --> Sink : READ\nUser:consumer
+Sink --> DBProducts : upsert разрешённых товаров
+
+Client --> ClientApi : search / recommend
+ClientApi --> TRequests : лог события запроса\nUser:producer
+ClientApi --> DBEvents : write client_events
+ClientApi --> DBProducts : read products\n(поиск / рекомендации)
+DBProducts --> ClientApi : результаты
+@enduml
 ```
 
 - **SHOP API** — эмуляция магазина: читает файл `data/products.json` и отправляет
