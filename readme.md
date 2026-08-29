@@ -1096,6 +1096,13 @@ docker exec -i marketplace-postgres psql -U marketplace -d marketplace -tAc \
   ```yaml
   command: ["/bin/bash", "-c", "export KAFKA_OPTS='-javaagent:/opt/jmx_prometheus_javaagent.jar=7071:/opt/jmx_exporter_config.yaml'; exec /etc/confluent/docker/run"]
   ```
+- **Все 6 брокеров в `docker-compose.yaml`** (`kafka1..3`, `backup1..3`) переведены
+  на образ `kafka-jmx:7.5.0` (через `build: ./kafka-jmx`) и запускаются с этим
+  `command`, поэтому JMX Exporter активен на каждом из них (порт `7071` внутри
+  сети `kafka-network`, доступен для Prometheus, но не опубликован на хост).
+- В `docker-compose.yaml` добавлены сервисы мониторинга: `prometheus` (9090),
+  `alertmanager` (9093), `grafana` (3000, admin/admin) и `alert-webhook` (5050).
+  Они поднимаются вместе со стендом одной командой `docker compose up -d --build`.
 - `monitoring/prometheus/prometheus.yml` — scrape-джобы: `kafka-brokers`
   (все 6 брокеров: `kafka1..3`, `backup1..3` на `:7071`), `prometheus`,
   `alertmanager`. Алерты отправляются в Alertmanager.
@@ -1124,8 +1131,9 @@ docker compose up -d --build
 #   Grafana     http://localhost:3000      (admin / admin)
 #   webhook     http://localhost:5050      (логи алертов: docker logs alert-webhook)
 #
-# JMX-метрики каждого брокера напрямую:
-#   curl -s http://localhost:7071/metrics | grep kafka_server
+ # JMX-метрики каждого брокера (внутри сети kafka-network, порт 7071):
+ #   docker compose exec kafka1 curl -s http://localhost:7071/metrics | grep kafka_server
+ #   (на хост порт 7071 не опубликован — смотрите через Prometheus ниже)
 ```
 
 ### 17.3 Проверка алерта «брокер упал»

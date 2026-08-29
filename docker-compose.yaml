@@ -1,6 +1,9 @@
 ﻿services:
   kafka1:
-    image: confluentinc/cp-kafka:7.5.0
+    image: kafka-jmx:7.5.0
+    build:
+      context: ./kafka-jmx
+    command: ["/bin/bash", "-c", "export KAFKA_OPTS='-javaagent:/opt/jmx_prometheus_javaagent.jar=7071:/opt/jmx_exporter_config.yaml'; exec /etc/confluent/docker/run"]
     hostname: kafka1
     ports:
       - "9095:9095"
@@ -42,11 +45,14 @@
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9095", "--command-config", "/etc/kafka/ssl-config/admin.properties", "--list"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 30
 
   kafka2:
-    image: confluentinc/cp-kafka:7.5.0
+    image: kafka-jmx:7.5.0
+    build:
+      context: ./kafka-jmx
+    command: ["/bin/bash", "-c", "export KAFKA_OPTS='-javaagent:/opt/jmx_prometheus_javaagent.jar=7071:/opt/jmx_exporter_config.yaml'; exec /etc/confluent/docker/run"]
     hostname: kafka2
     ports:
       - "9096:9096"
@@ -88,11 +94,14 @@
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9096", "--command-config", "/etc/kafka/ssl-config/admin.properties", "--list"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 30
 
   kafka3:
-    image: confluentinc/cp-kafka:7.5.0
+    image: kafka-jmx:7.5.0
+    build:
+      context: ./kafka-jmx
+    command: ["/bin/bash", "-c", "export KAFKA_OPTS='-javaagent:/opt/jmx_prometheus_javaagent.jar=7071:/opt/jmx_exporter_config.yaml'; exec /etc/confluent/docker/run"]
     hostname: kafka3
     ports:
       - "9097:9097"
@@ -134,7 +143,7 @@
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9097", "--command-config", "/etc/kafka/ssl-config/admin.properties", "--list"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 30
 
   producer:
@@ -212,7 +221,7 @@
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U marketplace -d marketplace"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 10
 
   # SHOP API: эмуляция магазина — читает файл и шлёт товары в Kafka (topic products)
@@ -334,7 +343,10 @@
   # (KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM="").
   # ---------------------------------------------------------------------------
   backup1:
-    image: confluentinc/cp-kafka:7.5.0
+    image: kafka-jmx:7.5.0
+    build:
+      context: ./kafka-jmx
+    command: ["/bin/bash", "-c", "export KAFKA_OPTS='-javaagent:/opt/jmx_prometheus_javaagent.jar=7071:/opt/jmx_exporter_config.yaml'; exec /etc/confluent/docker/run"]
     hostname: backup1
     ports:
       - "9195:9195"
@@ -374,11 +386,14 @@
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9195", "--command-config", "/etc/kafka/ssl-config/admin-backup.properties", "--list"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 30
 
   backup2:
-    image: confluentinc/cp-kafka:7.5.0
+    image: kafka-jmx:7.5.0
+    build:
+      context: ./kafka-jmx
+    command: ["/bin/bash", "-c", "export KAFKA_OPTS='-javaagent:/opt/jmx_prometheus_javaagent.jar=7071:/opt/jmx_exporter_config.yaml'; exec /etc/confluent/docker/run"]
     hostname: backup2
     environment:
       KAFKA_NODE_ID: 12
@@ -416,11 +431,14 @@
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9196", "--command-config", "/etc/kafka/ssl-config/admin-backup.properties", "--list"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 30
 
   backup3:
-    image: confluentinc/cp-kafka:7.5.0
+    image: kafka-jmx:7.5.0
+    build:
+      context: ./kafka-jmx
+    command: ["/bin/bash", "-c", "export KAFKA_OPTS='-javaagent:/opt/jmx_prometheus_javaagent.jar=7071:/opt/jmx_exporter_config.yaml'; exec /etc/confluent/docker/run"]
     hostname: backup3
     environment:
       KAFKA_NODE_ID: 13
@@ -458,7 +476,7 @@
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9197", "--command-config", "/etc/kafka/ssl-config/admin-backup.properties", "--list"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 30
 
   # MirrorMaker 2: дублирование products/client_requests из primary -> backup
@@ -542,6 +560,66 @@
     restart: on-failure
     networks:
       - kafka-network
+
+  # ---------------------------------------------------------------------------
+  # Мониторинг (Шаг 6): JMX Exporter уже вшит в брокеры (kafka-jmx образ),
+  # здесь — Prometheus, Alertmanager, Grafana и локальный webhook-приёмник.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    networks:
+      - kafka-network
+    restart: on-failure
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    networks:
+      - kafka-network
+    restart: on-failure
+
+  alert-webhook:
+    image: python:3.11-slim
+    container_name: alert-webhook
+    working_dir: /app
+    volumes:
+      - ./monitoring/alert-webhook:/app
+    command: ["python", "webhook.py", "5050"]
+    ports:
+      - "5050:5050"
+    networks:
+      - kafka-network
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - kafka-network
+    restart: on-failure
 
 networks:
   kafka-network:
