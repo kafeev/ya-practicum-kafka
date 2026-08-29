@@ -1,0 +1,67 @@
+lowercaseOutputName: true
+
+rules:
+  # Per-topic / per-partition BrokerTopicMetrics (Count + rate attributes, with labels)
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=(.+), clientId=(.+), topic=(.+), partition=(.+)><>(Count|OneMinuteRate|MeanRate|FiveMinuteRate|FifteenMinuteRate)"
+    name: kafka_server_brokertopicmetrics_$1
+    type: GAUGE
+    labels:
+      clientId: "$2"
+      topic: "$3"
+      partition: "$4"
+      attr: "$5"
+
+  # Aggregate BrokerTopicMetrics (no topic/partition dimension)
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=(.+)><>(Count|OneMinuteRate|MeanRate|FiveMinuteRate|FifteenMinuteRate)"
+    name: kafka_server_brokertopicmetrics_$1
+    type: GAUGE
+    labels:
+      attr: "$2"
+
+  # Per-topic / per-partition BrokerTopicMetrics (Value attribute, with labels)
+  - pattern: "kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.+)><>Value"
+    name: kafka_server_$1_$2
+    type: GAUGE
+    labels:
+      clientId: "$3"
+      topic: "$4"
+      partition: "$5"
+
+  # Per-client connection metrics (with labels)
+  - pattern: "kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value"
+    name: kafka_server_$1_$2
+    type: GAUGE
+    labels:
+      clientId: "$3"
+      brokerHost: "$4"
+      brokerPort: "$5"
+
+  # Aggregate server metrics (ReplicaManager, BrokerTopicMetrics, etc.)
+  - pattern: "kafka.server<type=(.+), name=(.+)><>Value"
+    name: kafka_server_$1_$2
+    type: GAUGE
+
+  # Network metrics
+  - pattern: "kafka.network<type=(.+), name=(.+)><>Value"
+    name: kafka_network_$1_$2
+    type: GAUGE
+
+  # Controller metrics
+  - pattern: "kafka.controller<type=(.+), name=(.+)><>Value"
+    name: kafka_controller_$1_$2
+    type: GAUGE
+
+  # Log metrics
+  - pattern: "kafka.log<type=(.+), name=(.+)><>Value"
+    name: kafka_log_$1_$2
+    type: GAUGE
+
+  # Common metrics
+  - pattern: "kafka.common<type=(.+), name=(.+)><>Value"
+    name: kafka_common_$1_$2
+    type: GAUGE
+
+  # JVM metrics
+  - pattern: "java.lang<type=(.+), name=(.+)><>Value"
+    name: java_lang_$1_$2
+    type: GAUGE

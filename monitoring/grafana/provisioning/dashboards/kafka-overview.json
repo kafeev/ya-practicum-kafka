@@ -1,0 +1,109 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 36,
+  "tags": ["kafka"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Kafka Overview",
+  "uid": "kafka-overview",
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Брокеры в сети / всего",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        { "expr": "count(up{job=\"kafka-brokers\"} == 1)", "legendFormat": "up", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Брокеры упали (down)",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        { "expr": "count(up{job=\"kafka-brokers\"} == 0)", "legendFormat": "down", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active Controller Count",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        { "expr": "sum(kafka_controller_kafkacontroller_activecontrollercount)", "legendFormat": "controllers", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Under-Replicated Partitions",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum(kafka_server_replicamanager_underreplicatedpartitions)", "legendFormat": "under-replicated", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Offline Partitions",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum(kafka_controller_kafkacontroller_offlinepartitionscount)", "legendFormat": "offline", "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Bytes In / sec",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum(rate(kafka_server_brokertopicmetrics_bytesinpersec{attr=\"Count\"}[1m]))", "legendFormat": "bytes in/sec", "refId": "A" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Request Handler Avg Idle %",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "avg(kafka_network_socketserver_networkprocessoravgidlepercent) * 100", "legendFormat": "idle %", "refId": "A" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Алерты (firing)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (alertname) (ALERTS{alertstate=\"firing\"})", "legendFormat": "{{alertname}}", "refId": "A" }
+      ]
+    }
+  ]
+}

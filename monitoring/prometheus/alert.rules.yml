@@ -1,0 +1,29 @@
+groups:
+  - name: kafka_alerts
+    rules:
+      - alert: KafkaBrokerDown
+        expr: up{job="kafka-brokers"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka брокер недоступен"
+          description: "Брокер {{ $labels.instance }} (кластер {{ $labels.cluster }}) не отвечает на JMX-экспортер более 30s."
+
+      - alert: KafkaUnderReplicatedPartitions
+        expr: sum(kafka_server_replicamanager_underreplicatedpartitions) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Есть недореплицированные партиции"
+          description: "Количество under-replicated партиций = {{ $value }}."
+
+      - alert: KafkaOfflinePartitions
+        expr: sum(kafka_controller_kafkacontroller_offlinepartitionscount) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Есть офлайн-партиции"
+          description: "Количество offline партиций = {{ $value }}."

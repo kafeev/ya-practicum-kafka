@@ -17,7 +17,9 @@
 13. [Шаг 2: отказоустойчивость Kafka](#13-шаг-2-отказоустойчивость-kafka-репликация-mininsyncreplicas-второй-кластер)
 14. [Шаг 3: аналитика на Spark (Structured Streaming + HDFS)](#14-шаг-3-аналитика-на-spark-structured-streaming--hdfs)
 15. [Шаг 4: потоковая фильтрация запрещённых товаров (Faust)](#15-шаг-4-потоковая-фильтрация-запрещённых-товаров-faust)
-16. [Шаг 5: хранение и поиск данных (расширенный вариант, PostgreSQL)](#16-шаг-5-хранение-и-поиск-данных-расширенный-вариант-postgresql)
+ 16. [Шаг 5: хранение и поиск данных (расширенный вариант, PostgreSQL)](#16-шаг-5-хранение-и-поиск-данных-расширенный-вариант-postgresql)
+ 17. [Шаг 6: мониторинг Kafka (Prometheus, JMX Exporter, Grafana, Alertmanager)](#17-шаг-6-мониторинг-kafka-prometheus-jmx-exporter-grafana-alertmanager)
+
 
 ---
 
@@ -908,3 +910,72 @@ docker compose run --rm client-api
 docker exec -i marketplace-postgres psql -U marketplace -d marketplace -tAc \
   "SELECT count(*) FROM products;"
 ```
+
+## 17. Шаг 6: мониторинг Kafka (Prometheus, JMX Exporter, Grafana, Alertmanager)
+
+Метрики Kafka собираются через **JMX Exporter**, который подключается к JVM
+каждого брокера как Java-агент (`-javaagent`) и отдаёт их в формате Prometheus
+на порту `7071`. Дальше работает классическая связка: **Prometheus** (сбор и
+алерты) → **Alertmanager** (маршрутизация) → **Grafana** (дашборды).
+
+### 17.1 Что добавлено
+
+- `kafka-jmx/Dockerfile` — образ на базе `confluentinc/cp-kafka:7.5.0`, в который
+  копируется `jmx_prometheus_javaagent.jar` (версия `0.20.0`) и
+  `kafka-jmx/kafka-jmx-config.yaml` (правила отбора JMX-метрик Kafka).
+- Агент запускается **только в JVM брокера**. Чтобы не ломать `kafka-topics`,
+  healthcheck и другие CLI (которые тоже являются JVM и пытались бы занять порт
+  `7071`), `KAFKA_OPTS` с агентом НЕ прописан в окружение контейнера, а
+  экспортируется прямо перед запуском брокера через `command`:
+  ```yaml
+  command: ["/bin/bash", "-c", "export KAFKA_OPTS='-javaagent:/opt/jmx_prometheus_javaagent.jar=7071:/opt/jmx_exporter_config.yaml'; exec /etc/confluent/docker/run"]
+  ```
+- `monitoring/prometheus/prometheus.yml` — scrape-джобы: `kafka-brokers`
+  (все 6 брокеров: `kafka1..3`, `backup1..3` на `:7071`), `prometheus`,
+  `alertmanager`. Алерты отправляются в Alertmanager.
+- `monitoring/prometheus/alert.rules.yml` — правила:
+  - `KafkaBrokerDown` — `up{job="kafka-brokers"} == 0` (брокер недоступен > 30с);
+  - `KafkaUnderReplicatedPartitions` — есть недореплицированные партиции;
+  - `KafkaOfflinePartitions` — есть офлайн-партиции.
+- `monitoring/alertmanager/alertmanager.yml` — маршрут на receiver `webhook`.
+- `monitoring/alert-webhook/webhook.py` — локальный приёмник алертов (Python
+  http-сервер), логирует алерты в stdout контейнера `alert-webhook`. Чтобы
+  отправлять уведомления во внешний канал (Slack/Telegram/email), замените
+  `url` в `alertmanager.yml` на свой webhook.
+- `monitoring/grafana/provisioning/...` — автоматически подключает Prometheus
+  как datasource и дашборд `Kafka Overview` (брокеры в сети/упали, active
+  controller, under-replicated/offline партиции, bytes in/sec, idle %, алерты).
+
+### 17.2 Запуск
+
+```bash
+# собрать кастомный образ брокеров с JMX-агентом и поднять мониторинг
+docker compose up -d --build
+
+# доступы:
+#   Prometheus  http://localhost:9090      (Status > Targets — все 6 брокеров up)
+#   Alertmanager http://localhost:9093
+#   Grafana     http://localhost:3000      (admin / admin)
+#   webhook     http://localhost:5050      (логи алертов: docker logs alert-webhook)
+#
+# JMX-метрики каждого брокера напрямую:
+#   curl -s http://localhost:7071/metrics | grep kafka_server
+```
+
+### 17.3 Проверка алерта «брокер упал»
+
+Останавливаем один брокер (кластер выживает: в основном кластере остаётся
+kafka1+kafka2, в резервном — backup1+backup2):
+
+```bash
+docker stop ya-practicum-kafka-kafka3-1
+# через ~1 минуту:
+#   Prometheus  -> Alerts -> KafkaBrokerDown (firing) для kafka3:7071
+#   Alertmanager -> Alerts -> KafkaBrokerDown (firing)
+#   docker logs alert-webhook -> [ALERT firing] KafkaBrokerDown | instance=kafka3:7071
+docker start ya-practicum-kafka-kafka3-1   # алерт уходит в resolved
+```
+
+Примечание: при остановке брокера также может сработать
+`KafkaUnderReplicatedPartitions` — это ожидаемо (часть партиций временно
+недореплицирована), после возврата брокера алерт сам закрывается.

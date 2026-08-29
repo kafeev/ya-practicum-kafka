@@ -1,0 +1,32 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - /etc/prometheus/alert.rules.yml
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+
+  - job_name: 'kafka-brokers'
+    static_configs:
+      - targets:
+          - 'kafka1:7071'
+          - 'kafka2:7071'
+          - 'kafka3:7071'
+          - 'backup1:7071'
+          - 'backup2:7071'
+          - 'backup3:7071'
+        labels:
+          cluster: 'kafka'
