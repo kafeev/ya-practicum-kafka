@@ -2,7 +2,7 @@
 # Инициализация БД маркетплейса (выполняется внутри контейнера Postgres).
 # Запускается от имени приложения (POSTGRESQL_USERNAME), поэтому таблицы
 # принадлежат нужному пользователю и не требуют дополнительных GRANT.
-set -euo pipefail
+set -eu
 
 export PGPASSWORD="${POSTGRES_PASSWORD:-${POSTGRESQL_PASSWORD}}"
 PSQL="psql -v ON_ERROR_STOP=1 -U ${POSTGRES_USER:-${POSTGRESQL_USERNAME}} -d ${POSTGRES_DB:-${POSTGRESQL_DATABASE}}"

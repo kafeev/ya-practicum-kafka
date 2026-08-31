@@ -211,7 +211,7 @@
       - "5432:5432"
     environment:
       - POSTGRES_USER=marketplace
-      - POSTGRES_PASSWORD=.
+      - POSTGRES_PASSWORD=marketplace
       - POSTGRES_DB=marketplace
     volumes:
       - postgres_data:/var/lib/postgresql/data

@@ -1,0 +1,23 @@
+
+curl http://localhost:8000/health HTTP/1.1
+
+content-type: application/json
+
+###
+
+curl -X POST http://localhost:8000/send \
+  -H "Content-Type: application/json" \
+  -d '{"sender":"user123","receiver":"user456","text":"Привет, как дела?"}'
+
+
+### проверка на запрет сообщений от пользователя Bob
+
+curl -X POST http://localhost:8000/send \
+  -H "Content-Type: application/json" \
+  -d '{"sender":"bob","receiver":"alice","text":"Привет, Alice!"}'
+
+
+### проверка на цензуру  
+curl -X POST http://localhost:8000/send \
+  -H "Content-Type: application/json" \
+  -d '{"sender":"jack","receiver":"alice","text":"Ты идиот!"}'

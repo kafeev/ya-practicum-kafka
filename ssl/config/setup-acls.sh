@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -eu
 BOOTSTRAP=${BOOTSTRAP:-kafka1:9095,kafka2:9096,kafka3:9097}
 ADMIN_CONFIG=${ADMIN_CONFIG:-/etc/kafka/ssl-config/admin.properties}
 
@@ -113,4 +113,3 @@ echo "=== Current ACLs (backup) ==="
 kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
   --command-config "$BACKUP_ADMIN" \
   --list
-
