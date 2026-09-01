@@ -10,6 +10,9 @@ from kafka import KafkaProducer, KafkaConsumer
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("forbidden-cli")
 
+# Придушить спам от kafka-python (Connection closed, Fetch cancelled и т.д.)
+logging.getLogger("kafka").setLevel(logging.CRITICAL)
+
 BOOTSTRAP = os.getenv("BOOTSTRAP_SERVERS", "kafka1:9095,kafka2:9096,kafka3:9097").split(",")
 SSL_CAFILE = os.getenv("SSL_CAFILE", "/etc/kafka/secrets/ca-cert")
 SSL_CERTFILE = os.getenv("SSL_CERTFILE", "/etc/kafka/secrets/client.producer-cert.pem")

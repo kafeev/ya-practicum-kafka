@@ -248,7 +248,9 @@
       - kafka-network
     restart: on-failure
 
-  # product-sink: консьюмер Kafka (topic products) -> PostgreSQL
+  # product-sink: консьюмер Kafka (topic products-allowed) -> PostgreSQL
+  # Важно: depends_on forbidden-filter, т.к. читает из products-allowed,
+  # который заполняет только forbidden-filter
   product-sink:
     build:
       context: .
@@ -258,6 +260,8 @@
         condition: service_healthy
       postgres:
         condition: service_healthy
+      forbidden-filter:
+        condition: service_started
     volumes:
       - ./ssl/certs:/etc/kafka/secrets:ro
     environment:

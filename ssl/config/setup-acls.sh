@@ -82,34 +82,42 @@ kafka-acls --bootstrap-server "$BOOTSTRAP" --command-config "$ADMIN_CONFIG" --li
 # ===== ACL для аналитики =====
 BACKUP_BOOTSTRAP=backup1:9195
 BACKUP_ADMIN=/etc/kafka/ssl-config/admin-backup.properties
-echo ">>> Setting ACL for analytics on backup cluster..."
 
-# Аналитика читает из резервного кластера primary.client_requests
-kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
-  --command-config "$BACKUP_ADMIN" \
-  --add --allow-principal User:analytics \
-  --operation DESCRIBE --operation READ --topic "primary.client_requests" \
-  --group "*"
+# Проверяем, доступен ли резервный кластер
+if kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" --command-config "$BACKUP_ADMIN" --list >/dev/null 2>&1; then
+  echo ">>> Setting ACL for analytics on backup cluster..."
 
-# Аналитика пишет в recommendations (в резервном кластере)
-kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
-  --command-config "$BACKUP_ADMIN" \
-  --add --allow-principal User:analytics \
-  --operation DESCRIBE --operation WRITE --topic recommendations
+  # Аналитика читает из резервного кластера primary.client_requests
+  kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+    --command-config "$BACKUP_ADMIN" \
+    --add --allow-principal User:analytics \
+    --operation DESCRIBE --operation READ --topic "primary.client_requests" \
+    --group "*"
 
-# Аналитика читает products (если нужно для обогащения)
-kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
-  --command-config "$BACKUP_ADMIN" \
-  --add --allow-principal User:analytics \
-  --operation DESCRIBE --operation READ --topic "primary.products"
+  # Аналитика пишет в recommendations (в резервном кластере)
+  kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+    --command-config "$BACKUP_ADMIN" \
+    --add --allow-principal User:analytics \
+    --operation DESCRIBE --operation WRITE --topic recommendations
 
-# Консьюмер может читать рекомендации
-kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
-  --command-config "$BACKUP_ADMIN" \
-  --add --allow-principal User:consumer \
-  --operation DESCRIBE --operation READ --topic recommendations
+  # Аналитика читает products (если нужно для обогащения)
+  kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+    --command-config "$BACKUP_ADMIN" \
+    --add --allow-principal User:analytics \
+    --operation DESCRIBE --operation READ --topic "primary.products"
 
-echo "=== Current ACLs (backup) ==="
-kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
-  --command-config "$BACKUP_ADMIN" \
-  --list
+  # Консьюмер может читать рекомендации
+  kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+    --command-config "$BACKUP_ADMIN" \
+    --add --allow-principal User:consumer \
+    --operation DESCRIBE --operation READ --topic recommendations
+
+  echo "=== Current ACLs (backup) ==="
+  kafka-acls --bootstrap-server "$BACKUP_BOOTSTRAP" \
+    --command-config "$BACKUP_ADMIN" \
+    --list
+else
+  echo ""
+  echo ">>> Резервный кластер (backup1:9195) недоступен — пропускаем ACL для аналитики."
+  echo "    Запустите backup-брокеры и перезапустите этот скрипт."
+fi

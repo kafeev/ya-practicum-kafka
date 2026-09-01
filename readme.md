@@ -111,9 +111,7 @@ docker compose ps
 # Все три брокера: Up ... (healthy)
 ```
 
-> 📸 **Скриншот:** `docker compose ps` — все 3 брокера `kafka1`, `kafka2`, `kafka3` со статусом `Up ... (healthy)`
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод docker compose ps с тремя брокерами kafka1/kafka2/kafka3 со статусом Up (healthy) -->
+![alt text](picts/picts/{F3B37A79-E30E-4BD9-915C-F500AA9DCD2C}.png)
 
 ---
 
@@ -122,6 +120,7 @@ docker compose ps
 ```bash
 docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
 ```
+![alt text](picts/picts/{F6D2A785-7238-499F-8337-8A59881E2DB7}.png)
 
 Скрипт создаёт в основном кластере:
 - `topic-1`, `topic-2` — демо-топики
@@ -137,8 +136,7 @@ docker compose exec kafka1 kafka-topics \
   --list
 # Ожидаем: topic-1, topic-2, products, client_requests, forbidden-products, products-allowed, products-rejected, ...
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод kafka-topics --list с перечнем всех созданных топиков -->
+![alt text](picts/picts/{8747ABAD-3250-43BC-8986-D0BE1E91C174}.png)
 
 ---
 
@@ -161,14 +159,17 @@ docker compose exec kafka1 kafka-acls \
   --list
 ```
 
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод kafka-acls --list со списком всех ACL (User:producer, User:consumer, User:analytics) -->
+![alt text](picts/picts/{9AD1BBB6-D36C-4A7F-BEFC-827DF833754F}.png)
 
 ---
 
-### Шаг 4. Запуск платформы маркетплейса (PostgreSQL + сервисы)
+### Шаг 4. Запуск платформы маркетплейса (PostgreSQL + Faust-фильтр + сервисы)
+
+**Важно:** `forbidden-filter` (Faust) — обязательный компонент конвейера. Он читает из `products`,
+фильтрует и пишет в `products-allowed`. Без него `product-sink` не получит ни одного товара.
 
 ```bash
-docker compose up -d postgres product-sink shop-api
+docker compose up -d postgres forbidden-filter shop-api product-sink
 ```
 
 **Проверка — товары попали в БД:**
@@ -177,16 +178,16 @@ docker compose exec -e PGPASSWORD=marketplace postgres \
   psql -U marketplace -d marketplace -c "SELECT count(*) FROM products;"
 # Ожидаем: 12
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод SQL-запроса с результатом count = 12 -->
+![alt text](picts/picts/{E9AD9A1C-B9E5-4E80-BD1D-A78C8BE61719}.png)
 
 **Логи:**
 ```bash
 docker compose logs -f shop-api       # "Отправлен товар 1001 ..."
 docker compose logs -f product-sink   # "Сохранён товар 1001 ..."
 ```
+![alt text](picts/{7E1678E3-B7A3-4BF7-A265-7601146E0FD2}.png)
 
-<!-- ВСТАВИТЬ СКРИНШОТ: логи shop-api с сообщениями "Отправлен товар ..." и product-sink с "Сохранён товар ..." -->
+![alt text](picts/{EA83E877-D6F3-4480-ABA4-1533F412926E}.png)
 
 ---
 
@@ -204,8 +205,7 @@ docker compose exec backup1 kafka-topics \
   --list
 # Ожидаем: primary.products, primary.client_requests, heartbeats, mm2-*
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод kafka-topics --list в backup-кластере с топиками primary.products, primary.client_requests -->
+![alt text](picts/{6A0C944F-872F-46B2-8D79-CE73B1BC9C56}.png)
 
 **Прочитать сообщения из резервного кластера:**
 ```bash
@@ -213,8 +213,7 @@ docker compose exec backup1 kafka-console-consumer \
   --bootstrap-server localhost:9195 --consumer.config /etc/kafka/ssl-config/admin-backup.properties \
   --topic primary.products --from-beginning --max-messages 12 --timeout-ms 8000
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод console-consumer из primary.products с JSON-данными товаров -->
+![alt text](picts/{5637D68B-EBC2-4C61-945F-B21C7C737FCF}.png)
 
 ---
 
@@ -230,8 +229,7 @@ docker compose logs -f spark-analytics
 # [batch N] raw data landed to HDFS (hdfs://hdfs-namenode:8020/user/spark/raw)
 # [batch N] recommendations written to topic 'recommendations'
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: логи spark-analytics с сообщениями о записи в HDFS и рекомендациях -->
+![alt text](picts/{7548DA7E-BFBE-4BBB-955E-DFB01F66CAD7}.png)
 
 **Прочитать рекомендации из резервного кластера:**
 ```bash
@@ -245,15 +243,13 @@ docker compose exec backup1 kafka-console-consumer \
 docker compose exec hdfs-namenode hdfs dfs -ls /user/spark/raw
 ```
 
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод hdfs dfs -ls /user/spark/raw с файлами .json -->
+![alt text](picts/{658F59E6-21CC-4212-B9C2-528C502D230D}.png)
 
 ---
 
-### Шаг 7. Запуск фильтра запрещённых товаров (Faust)
+### Шаг 7. Управление фильтром запрещённых товаров (Faust CLI)
 
-```bash
-docker compose up -d forbidden-filter
-```
+> **Примечание:** `forbidden-filter` уже запущен на шаге 4. Здесь мы только тестируем CLI-управление списком запрещённых.
 
 **Управление списком запрещённых (CLI):**
 ```bash
@@ -262,29 +258,27 @@ docker compose run --rm forbidden-filter python cli.py add 1005 \
   --name "Мужская куртка NORTH Hiker" --reason "запрещён к продаже"
 ```
 
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод cli.py add 1005 с подтверждением "Добавлено в запрещённые" -->
+![alt text](picts/image.png)
 
 ```bash
 # Показать текущий список
 docker compose run --rm forbidden-filter python cli.py list
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод cli.py list со списком запрещённых товаров -->
+![alt text](picts/{D6E0D59A-562A-47D2-839F-DD4859447C68}.png)
 
 ```bash
 # Удалить из запрещённых (tombstone в компактном топике)
 docker compose run --rm forbidden-filter python cli.py remove 1005
 ```
+![alt text](picts/{4383AB0C-B294-4611-9175-3011577F9FF9}.png)
 
 **Проверка фильтрации:**
 ```bash
 # Логи фильтра
 docker compose logs -f forbidden-filter
-# ОТКЛОНЁН товар 1005 — в списке запрещённых
 # ПРОПУЩЕН товар 1001 ...
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: логи forbidden-filter с строками "ОТКЛОНЁН товар 1005" и "ПРОПУЩЕН товар ..." -->
+![alt text](picts/{57C67CBC-FF8F-4413-90C5-16980B574444}.png)
 
 ```bash
 # Запрещённый товар в products-rejected, НЕ в products-allowed
@@ -292,17 +286,13 @@ docker compose exec kafka1 kafka-console-consumer \
   --bootstrap-server kafka1:9095 --consumer.config /etc/kafka/ssl-config/admin.properties \
   --topic products-rejected --from-beginning --max-messages 5 --timeout-ms 8000
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод console-consumer из products-rejected с JSON товара 1005 -->
+![alt text](picts/{16C769A2-05AA-4E12-A6C2-1F4F1825C829}.png)
 
 ```bash
-docker compose exec kafka1 kafka-console-consumer \
-  --bootstrap-server kafka1:9095 --consumer.config /etc/kafka/ssl-config/admin.properties \
-  --topic products-allowed --from-beginning --max-messages 60 --timeout-ms 8000 | grep -c 1005
+docker compose exec kafka1 kafka-console-consumer --bootstrap-server kafka1:9095 --consumer.config /etc/kafka/ssl-config/admin.properties --topic products-allowed --from-beginning --max-messages 60 --timeout-ms 8000 | Select-String "1005" | Measure-Object -Line
 # 0 — 1005 отфильтрован
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: результат grep -c 1005 = 0 (товар отсутствует в products-allowed) -->
+![alt text](picts/{83838A7B-5951-4F3A-8625-6F8A705E11E9}.png)
 
 ---
 
@@ -323,12 +313,12 @@ docker compose up -d prometheus alertmanager grafana alert-webhook
 | HDFS UI | http://localhost:9870 | — |
 | Alert-webhook | http://localhost:5050 | логи алертов: `docker logs alert-webhook` |
 
+![alt text](picts/{8B60F03B-7EC3-4334-B5DA-900AEB5DEC97}.png)
+
 **Проверка метрик брокера (внутри сети):**
 ```bash
-docker compose exec kafka1 curl -s http://localhost:7071/metrics | grep kafka_server
+docker compose exec kafka1 curl -s http://localhost:7071/metrics | Select-String "kafka_server" | ForEach-Object { $_.Line }
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод JMX-метрик брокера (kafka_server_*) -->
 
 **Тест алерта «брокер упал»:**
 ```bash
@@ -339,13 +329,13 @@ docker stop ya-practicum-kafka-kafka3-1
 #   docker logs alert-webhook -> [ALERT firing] KafkaBrokerDown | instance=kafka3:7071
 docker start ya-practicum-kafka-kafka3-1  # алерт уходит в resolved
 ```
+![alt text](picts/{65680728-520D-4211-A56B-D04EFB5D7905}.png)
+![alt text](picts/{5D891052-4FBE-43C8-8E44-D72ECBD7FD0A}.png)
+![alt text](picts/{843F7BB1-9D92-422A-AEFF-3C1BBD2EFE78}.png)
 
-<!-- ВСТАВИТЬ СКРИНШОТЫ:
-  1. Prometheus UI -> Alerts -> KafkaBrokerDown (firing)
-  2. Alertmanager UI -> Alerts -> KafkaBrokerDown (firing)
-  3. Логи alert-webhook: "[ALERT firing] KafkaBrokerDown | instance=kafka3:7071"
--->
-
+---
+после восстановления
+![alt text](picts/{50296C88-3DB0-4C8E-A6B1-82C7A78D8778}.png)
 ---
 
 ### Шаг 9. Интерактивная работа с CLIENT API
@@ -364,25 +354,20 @@ client> help
 client> exit
 ```
 
+![alt text](picts/{0A8D82B3-B596-4AC3-B919-43B11B0E13EE}.png)
+
 **Неинтерактивная проверка (для CI):**
 ```bash
-printf 'search user_1 часы\nrecommend user_1\nexit\n' | docker compose run --rm -T client-api
+"search user_1 часы`nrecommend user_1`nexit" | docker compose run --rm -T client-api
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод CLIENT API с результатами search и recommend -->
-
-**Ожидаемый результат:**
-- `search user_1 часы` → найдёт «Умные часы XYZ Watch Pro»
-- `recommend user_1` → персональная рекомендация по истории (напр. «Ноутбук ABC Book 14» по бренду ABC)
-- `recommend user_2` (без истории) → популярные товары
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод search с найденным товаром "Умные часы XYZ Watch Pro" и recommend с рекомендациями -->
 
 ---
 
 ### Шаг 10. Проверка демо-продюсера/консьюмера (topic-1)
 
 ```bash
+# запускаем producer \ consumer 
+docker compose up -d producer consumer
 # Продюсер шлёт сообщения каждые 2 секунды
 docker compose logs -f producer
 
@@ -390,11 +375,9 @@ docker compose logs -f producer
 docker compose logs -f consumer
 # В логах консьюмера появляются блоки "===== RECEIVED MESSAGE ====="
 ```
+![alt text](picts/{99499C59-0BEF-454F-90B1-2FB822D09EBB}.png)
 
-<!-- ВСТАВИТЬ СКРИНШОТЫ:
-  1. Логи producer: "Sending: {'id': ..., 'text': 'Hello Kafka ...'}"
-  2. Логи consumer: "===== RECEIVED MESSAGE =====" с содержимым сообщения
--->
+![alt text](picts/{256EC43F-E3A5-4BD8-AA47-B262EA3A1373}.png)
 
 **Негативный тест: консьюмер НЕ может читать topic-2 (только DESCRIBE)**
 ```bash
@@ -402,8 +385,7 @@ docker compose run --rm -e TOPIC=topic-2 consumer python -u consumer.py
 # Ожидаемая ошибка:
 # kafka.errors.TopicAuthorizationFailedError: [Error 29] TopicAuthorizationFailedError: {'topic-2'}
 ```
-
-<!-- ВСТАВИТЬ СКРИНШОТ: вывод с ошибкой TopicAuthorizationFailedError: {'topic-2'} -->
+![alt text](picts/{07BA2439-40F3-4551-8A3A-09A68008D7BF}.png)
 
 ---
 
@@ -450,26 +432,40 @@ docker compose logs -f consumer
 
 ---
 
-## Известные особенности и решения
-
-| Проблема | Решение |
-|----------|---------|
-| `AuthorizerNotReadyException` на старте (VOTE/FETCH) | Контроллерный листенер `CONTROLLER` использует PLAINTEXT, запросы идут с `Anonymous`. Добавлен `User:ANONYMOUS` в `KAFKA_SUPER_USERS` и `KAFKA_EARLY_START_LISTENERS: CONTROLLER` |
-| Разделитель в `KAFKA_SUPER_USERS` | Только `;` (StandardAuthorizer парсит по `;`). Запятая не работает. |
-| `[Error 31] ClusterAuthorizationFailedError` у продюсера | Идемпотентный продюсер требует `IDEMPOTENT_WRITE` на CLUSTER. В стенде `kafka-python==2.0.2` — идемпотентность не используется, отдельной CLUSTER-ACL не нужно. |
-| `KAFKA_AUTO_CREATE_TOPICS_ENABLE: false` | Автосоздание выключено, чтобы лишние топики не создавались неавторизованными клиентами. |
-| `mirror-maker` стартует до создания топиков | Перезапустить после шага 2: `docker compose restart mirror-maker` |
-| Spark чекпоинты | Вынесены в volume `spark-analytics-checkpoint` — стрим возобновляется после перезапуска без дублей. `failOnDataLoss=false` позволяет перечитывать топик после пересоздания. |
-| Faust broker list | Передаётся списком URL (`[kafka://kafka1:9095, ...]`), иначе aiokafka откатывается на `127.0.0.1:9092`. |
-
----
-
 ## Схема потока данных (сквозная)
 
-```
-SHOP API ──products──▶ [forbidden-filter] ──products-allowed──▶ product-sink ──▶ PostgreSQL
-                            │                                           ▲
-                          products-rejected                       CLIENT API (search/recommend)
-                                                                      │
-CLIENT API ──client_requests──▶ Kafka ──MM2──▶ backup(primary.*) ──▶ Spark ──▶ HDFS / recommendations
+```mermaid
+flowchart LR
+    subgraph Основной_кластер
+        SHOP["SHOP API"]
+        FF["forbidden-filter\n(Faust)"]
+        PS["product-sink"]
+        CA["CLIENT API"]
+        K1[("Kafka\ntopics")]
+        PG[("PostgreSQL")]
+
+        SHOP -->|"products"| K1
+        K1 -->|"products"| FF
+        FF -->|"products-allowed"| K1
+        FF -->|"products-rejected"| K1
+        K1 -->|"products-allowed"| PS
+        PS --> PG
+    end
+
+    subgraph Резервный_кластер
+        BK[("Kafka backup\nprimary.*")]
+        SP["Spark\nStructured Streaming"]
+        HDFS[("HDFS")]
+        REC[("recommendations\ntopic")]
+    end
+
+    subgraph Клиентский_запрос
+        CA -->|"client_requests"| K1
+        CA -.->|"search / recommend"| PG
+    end
+
+    K1 -->|"MirrorMaker 2"| BK
+    BK -->|"primary.client_requests"| SP
+    SP --> HDFS
+    SP --> REC
 ```
