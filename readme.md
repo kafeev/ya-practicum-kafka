@@ -111,7 +111,7 @@ docker compose ps
 # Все три брокера: Up ... (healthy)
 ```
 
-![alt text](picts/picts/{F3B37A79-E30E-4BD9-915C-F500AA9DCD2C}.png)
+![alt text](picts/{F3B37A79-E30E-4BD9-915C-F500AA9DCD2C}.png)
 
 ---
 
@@ -120,7 +120,7 @@ docker compose ps
 ```bash
 docker compose exec kafka1 bash /etc/kafka/ssl-config/create-topics.sh
 ```
-![alt text](picts/picts/{F6D2A785-7238-499F-8337-8A59881E2DB7}.png)
+![alt text](picts/{F6D2A785-7238-499F-8337-8A59881E2DB7}.png)
 
 Скрипт создаёт в основном кластере:
 - `topic-1`, `topic-2` — демо-топики
@@ -136,7 +136,7 @@ docker compose exec kafka1 kafka-topics \
   --list
 # Ожидаем: topic-1, topic-2, products, client_requests, forbidden-products, products-allowed, products-rejected, ...
 ```
-![alt text](picts/picts/{8747ABAD-3250-43BC-8986-D0BE1E91C174}.png)
+![alt text](picts/{8747ABAD-3250-43BC-8986-D0BE1E91C174}.png)
 
 ---
 
@@ -159,7 +159,7 @@ docker compose exec kafka1 kafka-acls \
   --list
 ```
 
-![alt text](picts/picts/{9AD1BBB6-D36C-4A7F-BEFC-827DF833754F}.png)
+![alt text](picts/{9AD1BBB6-D36C-4A7F-BEFC-827DF833754F}.png)
 
 ---
 
@@ -178,7 +178,7 @@ docker compose exec -e PGPASSWORD=marketplace postgres \
   psql -U marketplace -d marketplace -c "SELECT count(*) FROM products;"
 # Ожидаем: 12
 ```
-![alt text](picts/picts/{E9AD9A1C-B9E5-4E80-BD1D-A78C8BE61719}.png)
+![alt text](picts/{E9AD9A1C-B9E5-4E80-BD1D-A78C8BE61719}.png)
 
 **Логи:**
 ```bash
